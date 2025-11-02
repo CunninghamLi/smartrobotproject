@@ -103,4 +103,4 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 ## 🗄️ Data Format Specification & File Rotation Policy
 
 This project logs robot telemetry data locally on the Raspberry Pi to ensure reliability even if the network is unavailable. Two log files are created each day: one CSV file for telemetry and one JSON lines file for important events.
-# Telemetry CSV format (logged every ~2 seconds):
+### Telemetry CSV format (logged every ~2 seconds):
