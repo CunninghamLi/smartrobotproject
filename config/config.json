@@ -1,0 +1,26 @@
+{
+  "feeds": {
+    "startstop": "smartpath-dot-robot-dot-startstop",
+    "mode":      "smartpath-dot-robot-dot-mode",
+    "speed":     "smartpath-dot-robot-dot-speed",
+    "emergency": "smartpath-dot-robot-dot-emergency",
+
+    "distance":  "smartpath-dot-sensor-dot-distance",
+    "line":      "smartpath-dot-sensor-dot-line",
+    "battery":   "smartpath-dot-sensor-dot-battery",
+
+    "motor_l":   "act-dot-motor-left",
+    "motor_r":   "act-dot-motor-right",
+    "heartbeat": "robot-dot-heartbeat"
+  },
+
+  "avoid": { "threshold_cm": 20, "reverse_ms": 350, "turn_ms": 350 },
+
+  "line": {
+    "base_speed": 35,
+    "kp": 1200,
+    "ki": 0,
+    "kd": 0,
+    "correction_max": 1800
+  }
+}
