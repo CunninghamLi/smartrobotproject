@@ -1,39 +1,79 @@
-# 🤖 IoT Smart Mobile Robot System — Milestone 2  
+# 🤖 Smart Raspberry Pi IoT Robot — Milestone 2
+
+Champlain College — CST Program  
+Internet of Things / Smart Robot Project  
 
 ---
 
-## 🧭 Overview  
-
-This project implements an **autonomous IoT-connected robot car** using a **Raspberry Pi 4B**.  
-The system follows a line, detects and avoids obstacles, and streams live telemetry to **Adafruit IO** for remote monitoring and control.  
-It fulfills the official **Milestone 2** requirements for the *IoT Smart Mobile Robot System* track.
-
-**Key Features**
-- Line-following with PID or rule-based control  
-- Obstacle detection + safe stop/bypass using ultrasonic sensor  
-- Remote start/stop + mode control via MQTT dashboard  
-- Live telemetry: distance, motor speed, battery voltage, sensor states  
-- Daily local data logging + auto cloud upload  
-- Secure `.env` configuration (no hard-coded secrets)
+## 👤 Team Members
+| Name | Role |
+|------|------|
+| **Cunningham Li** | Full system implementation: Raspberry Pi setup, MQTT, dashboard, logging, wiring |
 
 ---
 
-## 🧩 System Architecture  
+## 🧠 System Overview
 
-```text
-┌──────────────────────────────┐
-│  Sensors (IR, Ultrasonic, DHT)│
-└────────────┬─────────────────┘
-             │
-     Raspberry Pi 4 (Python)
-             │
-   ┌─────────┴──────────┐
-   │ Motor Driver (TB6612FNG) │
-   │ Servo / Buzzer / LED     │
-   └─────────┬──────────┘
-             │
-     MQTT (paho-mqtt)
-             │
-   Adafruit IO Dashboard
-             │
-      User Remote Control
+This project implements a **smart IoT robot** using a Raspberry Pi and MQTT (Adafruit IO).  
+The robot can be controlled remotely via a cloud dashboard and logs its telemetry data locally.
+
+### ✅ Key Features
+- Cloud control (Adafruit IO MQTT)
+- Start / Stop motor control
+- Adjustable speed (0–100%)
+- Emergency stop override
+- Local CSV logging & JSON event logging
+- Daily file rotation
+- Heartbeat status feed
+- Graceful shutdown + retry logic
+
+> ⚠️ Hardware Note: Freenove sensor board malfunctioned.  
+Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard work fully.
+
+---
+
+## 📦 System Block Diagram
+
+              🌐 Adafruit IO (Cloud Dashboard)
+                      |
+                      |  MQTT Commands + Status
+                      v
+        +--------------------------------------+
+        |     Raspberry Pi (Python Program)    |
+        |--------------------------------------|
+        | • MQTT Client (paho-mqtt)            |
+        | • Motor Control (PWM)                |
+        | • Speed Control (0–100%)             |
+        | • Emergency Stop Logic               |
+        | • Heartbeat Feed                     |
+        | • Local CSV & JSONL Logging          |
+        | • Retry & Graceful Shutdown          |
+        +--------------------+-----------------+
+                             |
+                             | GPIO Ribbon Cable
+                             v
+              +-------------------------------+
+              |   Freenove Motor Driver PCB   |
+              |   • H-Bridges for 4 Motors    |
+              +-------------------------------+
+                             |
+                             | DC Power
+                             v
+              🚗 DC Motors (4-Wheel Drive Robot)
+
+---
+
+## 🧾 Bill of Materials (BOM)
+
+| Component | Model / Part Number | Quantity | Link |
+|----------|---------------------|---------|------|
+| **Raspberry Pi 4 Model B (4GB)** | RPI4-4GB | 1 | https://www.raspberrypi.com/products/raspberry-pi-4-model-b/ |
+| **Freenove 4WD Smart Car Kit for Raspberry Pi** | FNK0042 (kit bundle) | 1 | https://www.amazon.ca/dp/B07YD2LT9D |
+| **MicroSD Card 32GB (OS Storage)** | SanDisk Ultra 32GB | 1 | https://www.amazon.ca/dp/B07H4V6N65 |
+| **Power Bank (5V USB Output)** | Generic portable battery | 1 | https://www.amazon.ca/dp/B08JRX7W9X |
+| **USB-C Power Cable for Raspberry Pi** | Standard USB-C cable | 1 | https://www.amazon.ca/dp/B07Y8D67W2 |
+| **Jumper Wires / Ribbon Cable** | Included in Freenove kit | — | Included in kit |
+| **Screwdriver & Assembly Tools** | Included in Freenove kit | — | Included in kit |
+
+> Note: Sensor board from kit malfunctioned — motors and cloud control still implemented successfully.
+
