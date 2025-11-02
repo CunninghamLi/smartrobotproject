@@ -78,4 +78,5 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 > Note: Sensor board from kit malfunctioned — motors and cloud control still implemented successfully.
 
 ---
+![IMG_9640](https://github.com/user-attachments/assets/10d2fea4-6d8a-4df1-8c01-2384a6f1783f)
 
