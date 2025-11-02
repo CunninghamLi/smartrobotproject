@@ -103,4 +103,37 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 ## 🗄️ Data Format Specification & File Rotation Policy
 
 This project logs robot telemetry data locally on the Raspberry Pi to ensure reliability even if the network is unavailable. Two log files are created each day: one CSV file for telemetry and one JSON lines file for important events.
+
 ### Telemetry CSV format (logged every ~2 seconds):
+- timestamp (ISO-8601, UTC)
+- distance sensor reading (cm) – simulated (blank due to hardware issue)
+- line sensor state – simulated (blank)
+- battery voltage – simulated (blank)
+- running state (0 or 1)
+- emergency state (0 or 1)
+- speed command (% from Adafruit dashboard)
+- left motor duty cycle (%)
+- right motor duty cycle (%)
+
+### Event log format (JSONL, whenever an important event happens):
+- timestamp
+- event name (ex: “emergency_on”)
+- robot state (running or stopped)
+- speed value at event moment
+
+### File rotation policy:
+- Log files are created daily
+- File name format: YYYY-MM-DD_robot_telemetry.csv and YYYY-MM-DD_events.jsonl
+- Files are stored locally in data/ and logs/ folders
+- Old log files remain saved for history unless manually deleted
+- UTC timezone used for consistent timestamps
+
+### Purpose:
+- Ensures long-term data storage
+- Protects against cloud outages
+- Provides evidence of robot operation history for milestone requirements
+
+---
+
+
+  
