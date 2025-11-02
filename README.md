@@ -95,7 +95,7 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 
 ## ▶️ How to Run the Robot
 
-- Change directory to robot_iot/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+- Change directory to src
 - Run python3 mqtt_drive.py
 
 ---
