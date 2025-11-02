@@ -90,6 +90,13 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 - Clone the repo
 - Install python dependencies in requirements.txt
 - Create .env and config.json
-- Go to robot_iot/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server and run python3 mqtt_drive.py
 
 ---
+
+## ▶️ How to Run the Robot
+
+- Change directory to robot_iot/Freenove_4WD_Smart_Car_Kit_for_Raspberry_Pi/Code/Server
+- Run python3 mqtt_drive.py
+
+---
+
