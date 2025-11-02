@@ -135,5 +135,18 @@ This project logs robot telemetry data locally on the Raspberry Pi to ensure rel
 
 ---
 
+## ⚠️ Known Limitations and 🚀 Future Work
 
-  
+### Known Limitations
+- Freenove sensor board malfunctioned, so ultrasonic, line-tracking, and camera sensors are not active.
+- Robot currently runs only in manual MQTT control mode (no autonomous movement).
+- Motor feedback uses PWM percentage — no wheel encoders for real speed measurement.
+
+### Future Work
+- Replace sensor hardware and reactivate distance, line-tracking, and camera modules.
+- Implement autonomous modes (line following, obstacle avoidance, room mapping).
+- Add video streaming with OpenCV / Pi Camera for remote monitoring.
+- Add battery voltage monitoring and low-battery safe shutdown.
+- Build a local Flask or FastAPI web dashboard for offline control.
+
+---
