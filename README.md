@@ -1,6 +1,6 @@
 # 🤖 Smart Raspberry Pi IoT Robot — Milestone 2
 
-Champlain College — CST Program  
+Champlain College St-Lambert
 Internet of Things / Smart Robot Project  
 
 ---
@@ -76,4 +76,6 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 | **Screwdriver & Assembly Tools** | Included in Freenove kit | — | Included in kit |
 
 > Note: Sensor board from kit malfunctioned — motors and cloud control still implemented successfully.
+
+---
 
