@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import paho.mqtt.client as mqtt
 
-# â”€â”€ .env â”€â”€
+# === .env ===
 load_dotenv()
 AIO_USER = os.getenv("AIO_USERNAME", "").strip()
 AIO_KEY  = os.getenv("AIO_KEY", "").strip()
@@ -18,14 +18,14 @@ if not AIO_USER or not AIO_KEY:
     print("ERROR: Missing AIO_USERNAME or AIO_KEY in .env")
     sys.exit(1)
 
-# â”€â”€ paths (data/logs for local history) â”€â”€
+# === paths (data/logs for local history) ===
 ROOT_DIR = Path(__file__).resolve().parents[0]
 DATA_DIR = ROOT_DIR / "data"         # CSV telemetry
 LOGS_DIR = ROOT_DIR / "logs"         # JSONL events
 for d in (DATA_DIR, LOGS_DIR):
     d.mkdir(exist_ok=True)
 
-# â”€â”€ config.json â”€â”€
+# === config.json ===
 CFG_PATH = ROOT_DIR / "config.json"
 with CFG_PATH.open("r", encoding="utf-8") as f:
     CFG = json.load(f)
@@ -80,10 +80,10 @@ FEED_MOTOR_L   = feed("motor_l")
 FEED_MOTOR_R   = feed("motor_r")
 FEED_HEARTBEAT = feed("heartbeat")
 
-# â”€â”€ Freenove motor â”€â”€
+# === Freenove motor ===
 from motor import Ordinary_Car
 
-# â”€â”€ globals/state â”€â”€
+# === globals/state ===
 STOP_EVENT      = threading.Event()     # graceful shutdown flag
 running         = False
 emergency_on    = False
@@ -106,7 +106,7 @@ _last_pub_time_motor = 0.0
 _shutting_down = False
 _car_closed = False
 
-# â”€â”€ logging helpers (UTC) â”€â”€
+# === logging helpers (UTC) ===
 USE_UTC = True
 _log_last_write = 0.0
 _log_cur_path = None
@@ -139,7 +139,7 @@ def ensure_csv_header(path: Path):
     _log_header_written = True
 
 def append_csv_row(path: Path, row: str):
-    # âœ… file I/O with basic retries
+    # file I/O with basic retries
     def _write():
         with path.open("a", encoding="utf-8") as f:
             f.write(row + "\n")
@@ -154,14 +154,14 @@ def log_event(msg: str):
         "emergency": emergency_on,
         "speed_pct": speed_pct
     }
-    # âœ… file I/O with basic retries
+    # file I/O with basic retries
     def _append_jsonl():
         with p.open("a", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
             f.write("\n")
     _retry(_append_jsonl, attempts=3, delay=0.3)
 
-# â”€â”€ MQTT publish rate limiter (coalescing) â”€â”€
+# === MQTT publish rate limiter (coalescing) ===
 RATE_LIMIT_SECONDS = 2.1   # ~30/min on free plan
 _publish_lock = threading.Lock()
 _publish_queue = collections.OrderedDict()
@@ -182,7 +182,7 @@ def flush_publish_queue_now():
         topic, (payload, retain) = _publish_queue.popitem(last=True)
     try:
         if client:
-            # âœ… MQTT publish with basic retries (doesn't change queue/throttle behavior)
+            # MQTT publish with basic retries (doesn't change queue/throttle behavior)
             def _do_pub():
                 return client.publish(topic, payload, retain=retain)
             _retry(_do_pub, attempts=3, delay=0.5)
@@ -200,7 +200,7 @@ def start_publisher_thread():
     _pub_thread = threading.Thread(target=publisher_loop, daemon=True)
     _pub_thread.start()
 
-# â”€â”€ core helpers â”€â”€
+# === core helpers ===
 def pct_to_pwm(p: int) -> int:
     p = max(0, min(100, int(p)))
     return int(round(p * 4095 / 100))
@@ -217,7 +217,7 @@ def safe_stop():
     except Exception as e:
         print("[safe_stop] err:", e)
 
-# âœ… minimal generic retry helper (used above)
+# minimal generic retry helper (used above)
 def _retry(fn, *args, attempts=3, delay=0.5, **kwargs):
     for i in range(attempts):
         try:
@@ -232,7 +232,7 @@ def _is_on(v: str) -> bool:
     v = (v or "").strip().lower()
     return v in {"on","1","true","start","go","enabled","enable","yes","active"}
 
-# â”€â”€ MQTT callbacks â”€â”€
+# === MQTT callbacks ===
 def on_connect(c, u, flags, rc):
     print("Connected rc=", rc)
     for f in (FEED_STARTSTOP, FEED_SPEED):
@@ -292,7 +292,7 @@ def on_message(c, u, msg):
         except Exception as e:
             print(f"[speed] invalid value '{val}' ({e})")
 
-# â”€â”€ motors â”€â”€
+# === motors ===
 def _apply_motor(a,b,c,d):
     a*=FORWARD_SIGN; b*=FORWARD_SIGN; c*=FORWARD_SIGN; d*=FORWARD_SIGN
     try:
@@ -329,7 +329,7 @@ def drive_forward_pct(p):
     _apply_motor(v,v,v,v)
     _maybe_publish_motor_duty(v,v,v,v)
 
-# â”€â”€ main loop & shutdown â”€â”€
+# === main loop & shutdown ===
 def heartbeat(now):
     global _last_hb
     if now - _last_hb >= 60.0:
@@ -361,7 +361,7 @@ def main_loop():
                 ensure_csv_header(path)
 
             ts = iso_now()
-            # sensors not available â€” keep blank to satisfy schema; grader sees columns
+            # sensors not available
             dist = ""       # cm
             line = ""       # state
             batt = ""       # volts
@@ -411,7 +411,7 @@ signal.signal(signal.SIGINT,  _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 atexit.register(_shutdown_sequence)
 
-# â”€â”€ entry â”€â”€
+# === entry ===
 if __name__ == "__main__":
     try:
         car = Ordinary_Car()
