@@ -5,10 +5,14 @@
 
 ## Adafruit IO Dashboard  
 🔗 **Dashboard:** https://io.adafruit.com/cunninghamli/dashboards/smartpath  
+<img width="1914" height="986" alt="image" src="https://github.com/user-attachments/assets/66b6728b-e751-462b-addb-bbf421c6a5a8" />
+
 _(Private for security reasons)_
 
 ## Cloud Storage (Daily Log Uploads)  
 🔗 **Google Drive Folder:** https://drive.google.com/drive/my-drive  
+<img width="1919" height="993" alt="image" src="https://github.com/user-attachments/assets/6166c1c5-3f7a-4e35-8032-ce7d156317b3" />
+
 _(Contains automatically uploaded daily logs)_
 
 ## Project Overview  
