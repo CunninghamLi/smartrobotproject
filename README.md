@@ -1,4 +1,4 @@
-# 🤖 Smart Raspberry Pi IoT Robot — Milestone 2
+# 🤖 SmartPath
 
 Champlain College St-Lambert
 Internet of Things / Smart Robot Project  
