@@ -34,32 +34,8 @@ Sensors are simulated, but all IoT logic, logging, MQTT feeds, and dashboard wor
 
 ## 📦 System Block Diagram
 
-              🌐 Adafruit IO (Cloud Dashboard)
-                      |
-                      |  MQTT Commands + Status
-                      v
-        +--------------------------------------+
-        |     Raspberry Pi (Python Program)    |
-        |--------------------------------------|
-        | • MQTT Client (paho-mqtt)            |
-        | • Motor Control (PWM)                |
-        | • Speed Control (0–100%)             |
-        | • Emergency Stop Logic               |
-        | • Heartbeat Feed                     |
-        | • Local CSV & JSONL Logging          |
-        | • Retry & Graceful Shutdown          |
-        +--------------------+-----------------+
-                             |
-                             | GPIO Ribbon Cable
-                             v
-              +-------------------------------+
-              |   Freenove Motor Driver PCB   |
-              |   • H-Bridges for 4 Motors    |
-              +-------------------------------+
-                             |
-                             | DC Power
-                             v
-              🚗 DC Motors (4-Wheel Drive Robot)
+<img width="1485" height="827" alt="image" src="https://github.com/user-attachments/assets/0e06c77f-0ecf-484c-b181-e6bb2d06706e" />
+
 
 ---
 
