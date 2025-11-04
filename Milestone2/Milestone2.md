@@ -22,4 +22,4 @@ The hardest part was debugging sensor behavior and making sure the robot reacted
 If I had more time, I would integrate real hardware sensors once they work consistently instead of relying on simulation, and improve the dashboard UI for smoother control. I would also add a “simulation mode” toggle and possibly live camera streaming. Overall, I learned a lot about IoT communication, safety logic, and debugging embedded systems.
 
 ## Demo Video  
-📺 **YouTube Link:** _Coming soon_
+📺 **Link:** https://slcqc-my.sharepoint.com/:v:/g/personal/2231358_champlaincollege_qc_ca/EdroHz7UQ61Or6kDf5RQf34BK0nIdUpyyM62thvEYGQWRA?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=UaA1zk 
