@@ -5,7 +5,8 @@
 
 ## Adafruit IO Dashboard  
 🔗 **Dashboard:** https://io.adafruit.com/cunninghamli/dashboards/smartpath  
-<img width="1914" height="986" alt="image" src="https://github.com/user-attachments/assets/66b6728b-e751-462b-addb-bbf421c6a5a8" />
+<img width="1919" height="988" alt="image" src="https://github.com/user-attachments/assets/d2618558-779c-4bbc-983e-ae551fd029a8" />
+
 
 _(Private for security reasons)_
 
