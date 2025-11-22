@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-# mqtt_drive.py â€” movement + simulated sensors, throttle-safe, graceful Ctrl+C, Emergency Stop,
-# Local Data Logging, basic retries, modes manual/line (line includes obstacle rule),
-# combined motor telemetry, camera/status publishing every 10s
+# mqtt_drive.py
+# Robot brain for Adafruit IO control + real sensors + manual, line, obstacle modes
 
 import os, sys, time, json, signal, threading, collections, atexit, math
 from pathlib import Path
@@ -51,13 +50,13 @@ def _topic_variants(full_topic_with_prefix: str):
     def both(k: str):
         return {k.replace(".", "-dot-"), k.replace("-dot-", ".")}
     cand = set()
-    cand |= { _full(k) for k in both(key) }
+    cand |= {_full(k) for k in both(key)}
     if key.startswith(f"{PREFIX}."):
         bare = key[len(f"{PREFIX}."):]
-        cand |= { _full(k) for k in both(bare) }
+        cand |= {_full(k) for k in both(bare)}
     if key.startswith(f"{PREFIX}-dot-"):
         bare = key[len(f"{PREFIX}-dot-"):]
-        cand |= { _full(k) for k in both(bare) }
+        cand |= {_full(k) for k in both(bare)}
     return list(cand)
 
 def emergency_topic_variants(full_topic_with_prefix: str):
@@ -68,23 +67,25 @@ FEED_STARTSTOP = feed("startstop")
 FEED_SPEED     = feed("speed")
 FEED_EMERGENCY = feed("emergency")
 EMERGENCY_TOPICS = emergency_topic_variants(FEED_EMERGENCY)
-
 FEED_MODE      = feed("mode")
 
-# simulated telemetry (for dashboard display)
-FEED_DISTANCE  = feed("distance")  # smartpath-dot-sensor-dot-distance
-FEED_LINE      = feed("line")      # smartpath-dot-sensor-dot-line
-FEED_CAMERA    = feed("camera")    # smartpath-dot-camera-dot-status
+FEED_DISTANCE  = feed("distance")
+FEED_LINE      = feed("line")
+FEED_CAMERA    = feed("camera") if "camera" in CFG.get("feeds", {}) else None
 FEED_MOTOR     = feed("motor")
 
-# NEW operator input feeds (add to config.json):
-# "line_input":     "smartpath-dot-input-dot-line"
-# "distance_input": "smartpath-dot-input-dot-distance"
-FEED_LINE_IN      = feed("line_input")
-FEED_DISTANCE_IN  = feed("distance_input")
+# New control feeds
+FEED_LED     = feed("led")
+FEED_SERVO0  = feed("servo0")
+FEED_BUZZER  = feed("buzzer")
 
-# === Freenove motor ===
+# === Freenove devices ===
 from motor import Ordinary_Car
+from infrared import Infrared
+from ultrasonic import Ultrasonic
+from led import Led
+from servo import Servo
+from buzzer import Buzzer
 
 # === globals/state ===
 STOP_EVENT      = threading.Event()
@@ -101,20 +102,25 @@ car             = None
 client          = None
 _pub_thread     = None
 
-_last_applied_speed = None
+led_obj         = Led()
+servo_obj       = Servo()
+buzzer_obj      = Buzzer()
+ir_sensor       = Infrared()
+ultra_sensor    = Ultrasonic()
+
 _last_pub_time_motor = 0.0
 _last_pub_motor = {"combined": None}
 
 _shutting_down = False
 _car_closed = False
 
-# input state + freshness
-last_line      = "CENTER"  # default last-known line if operator never sets it
-last_distance  = None      # int cm
+# sensor state + freshness
+last_line      = "CENTER"
+last_distance  = None
 t_line         = 0.0
 t_distance     = 0.0
-STALE_SEC      = 6.0
-DIST_STOP_CM   = 10        # <= 10 -> reverse, then stop
+STALE_SEC      = 2.0
+DIST_STOP_CM   = 12
 REV_MS         = int(CFG.get("avoid", {}).get("reverse_ms", 350))
 
 # === logging helpers (UTC) ===
@@ -175,6 +181,8 @@ _publish_queue = collections.OrderedDict()
 _last_pub_time = 0.0
 
 def enqueue_publish(topic, payload, retain=False, qos=0):
+    if not topic:
+        return
     with _publish_lock:
         _publish_queue[topic] = (str(payload), retain, qos)
 
@@ -237,12 +245,39 @@ def _is_on(v: str) -> bool:
     v = (v or "").strip().lower()
     return v in {"on","1","true","start","go","enabled","enable","yes","active"}
 
-# === simulated sensors (DISPLAY ONLY) ===
+# === real sensors ===
 def read_distance_cm():
-    return max(0, int(60 + 40 * math.sin(time.time())))
+    try:
+        d = ultra_sensor.get_distance()
+        if d is None:
+            return None
+        d = float(d)
+        if d < 0:
+            return None
+        return d
+    except Exception:
+        return None
 
 def read_line_state():
-    return ["LEFT", "CENTER", "RIGHT"][int(time.time()) % 3]
+    try:
+        bits = ir_sensor.read_all_infrared()  # 0 to 7
+        L = (bits >> 2) & 1
+        M = (bits >> 1) & 1
+        R = bits & 1
+
+        if M == 1 and L == 0 and R == 0:
+            return "CENTER"
+        if L == 1 and M == 0 and R == 0:
+            return "LEFT"
+        if R == 1 and M == 0 and L == 0:
+            return "RIGHT"
+        if L == 1 and M == 1 and R == 0:
+            return "LEFT"
+        if R == 1 and M == 1 and L == 0:
+            return "RIGHT"
+        return "LOST"
+    except Exception:
+        return "LOST"
 
 def read_camera_status():
     return "online"
@@ -250,8 +285,7 @@ def read_camera_status():
 def read_camera_fps():
     return 12 + int(3 * math.sin(time.time()/3.0))
 
-# publish every 10s for distance, line, camera (telemetry only)
-SENSOR_INTERVAL = 10.0
+SENSOR_INTERVAL = 2.0
 _last_sensor_pub_all = 0.0
 
 def publish_sensors(now):
@@ -259,31 +293,116 @@ def publish_sensors(now):
     if now - _last_sensor_pub_all < SENSOR_INTERVAL:
         return
     _last_sensor_pub_all = now
-    try: enqueue_publish(FEED_DISTANCE, read_distance_cm())
-    except: pass
-    try: enqueue_publish(FEED_LINE, read_line_state())
-    except: pass
+
     try:
-        cam_payload = f"status={read_camera_status()},fps={read_camera_fps()}"
-        enqueue_publish(FEED_CAMERA, cam_payload)
-    except: pass
+        d = read_distance_cm()
+        if d is not None:
+            enqueue_publish(FEED_DISTANCE, round(d, 2))
+    except:
+        pass
+
+    try:
+        enqueue_publish(FEED_LINE, read_line_state())
+    except:
+        pass
+
+    if FEED_CAMERA:
+        try:
+            cam_payload = f"status={read_camera_status()},fps={read_camera_fps()}"
+            enqueue_publish(FEED_CAMERA, cam_payload)
+        except:
+            pass
+
+# === LED helpers (Option A) ===
+def leds_off():
+    try:
+        led_obj.colorBlink(0)
+        led_obj.ledIndex(0x00, 0, 0, 0)
+    except Exception as e:
+        print("[led] off error:", e)
+
+def leds_color(r, g, b):
+    try:
+        led_obj.ledIndex(0xFF, int(r), int(g), int(b))
+    except Exception as e:
+        print("[led] color error:", e)
+
+def handle_led_command(val: str):
+    v = val.strip().lower()
+    if v in {"off", "0"}:
+        leds_off()
+    elif v in {"on", "white", "1"}:
+        leds_color(255, 255, 255)
+    elif v == "red":
+        leds_color(255, 0, 0)
+    elif v == "green":
+        leds_color(0, 255, 0)
+    elif v == "blue":
+        leds_color(0, 0, 255)
+    else:
+        print("[led] unknown command:", val)
+
+# === Servo helpers (Option A, channel 0) ===
+def handle_servo0_command(val: str):
+    v = val.strip().lower()
+    try:
+        if v in {"left", "0"}:
+            servo_obj.set_servo_pwm("0", 0)
+        elif v in {"center", "mid", "90"}:
+            servo_obj.set_servo_pwm("0", 90)
+        elif v in {"right", "180"}:
+            servo_obj.set_servo_pwm("0", 180)
+        else:
+            angle = int(float(v))
+            angle = max(0, min(180, angle))
+            servo_obj.set_servo_pwm("0", angle)
+    except Exception as e:
+        print("[servo0] error:", e)
+
+# === Buzzer helpers ===
+def buzzer_off():
+    try:
+        buzzer_obj.set_state(False)
+    except Exception as e:
+        print("[buzzer] off error:", e)
+
+def buzzer_on():
+    try:
+        buzzer_obj.set_state(True)
+    except Exception as e:
+        print("[buzzer] on error:", e)
+
+def handle_buzzer_command(val: str):
+    v = val.strip().lower()
+    if v in {"off", "0"}:
+        buzzer_off()
+    elif v in {"on", "1"}:
+        buzzer_on()
+    elif v == "beep":
+        buzzer_on()
+        time.sleep(0.1)
+        buzzer_off()
+    else:
+        print("[buzzer] unknown command:", val)
 
 # === MQTT callbacks ===
 def on_connect(c, u, flags, rc):
     print("Connected rc=", rc)
-    for f in (FEED_STARTSTOP, FEED_SPEED, FEED_MODE, FEED_LINE_IN, FEED_DISTANCE_IN):
-        c.subscribe(f); print("Subscribed:", f)
+    for f in (FEED_STARTSTOP, FEED_SPEED, FEED_MODE, FEED_LED, FEED_SERVO0, FEED_BUZZER):
+        c.subscribe(f)
+        print("Subscribed:", f)
     for t in EMERGENCY_TOPICS:
-        c.subscribe(t); print("Subscribed:", t)
+        c.subscribe(t)
+        print("Subscribed:", t)
     throttle_topic = f"{AIO_USER}/throttle"
-    c.subscribe(throttle_topic); print("Subscribed:", throttle_topic)
+    c.subscribe(throttle_topic)
+    print("Subscribed:", throttle_topic)
 
 def on_disconnect(c, u, rc):
     print("Disconnected rc=", rc)
 
 def on_message(c, u, msg):
     global running, speed_pct, emergency_on, _was_running_before_emergency, current_mode
-    global last_line, last_distance, t_line, t_distance
 
     val = msg.payload.decode(errors="ignore").strip()
     print(f"MSG {msg.topic} -> {val}")
@@ -308,51 +427,37 @@ def on_message(c, u, msg):
             running = False
             safe_stop()
             log_event("emergency_on")
-            print("[emergency] STOP engaged")
         else:
             log_event("emergency_off")
-            print("[emergency] cleared")
             if EMERGENCY_AUTO_RESUME and _was_running_before_emergency:
                 running = True
-                print("[emergency] auto-resume active")
 
     elif msg.topic == FEED_SPEED:
         try:
             s_raw = float(val)
             s_clamped = max(0, min(100, int(round(s_raw))))
-            if s_clamped != speed_pct:
-                prev = speed_pct
-                speed_pct = s_clamped
-                print(f"[speed] changed: {prev}% -> {speed_pct}%")
-            else:
-                print(f"[speed] received {s_clamped}% (no change)")
+            speed_pct = s_clamped
         except Exception as e:
-            print(f"[speed] invalid value '{val}' ({e})")
+            print(f"[speed] invalid '{val}' ({e})")
 
     elif msg.topic == FEED_MODE:
         v = val.lower()
-        if   v.startswith("line"):  current_mode = "line"
-        else:                       current_mode = "manual"
+        if v.startswith("line"):
+            current_mode = "line"
+        elif v.startswith("obstacle"):
+            current_mode = "obstacle"
+        else:
+            current_mode = "manual"
         print(f"[mode] -> {current_mode}")
 
-    elif msg.topic == FEED_LINE_IN:
-        v = val.upper()
-        if v in ("LEFT","CENTER","RIGHT"):
-            last_line = v
-            t_line = time.time()
-            print(f"[line_input] -> {last_line}")
-        else:
-            print(f"[line_input] invalid '{val}'")
+    elif msg.topic == FEED_LED:
+        handle_led_command(val)
 
-    elif msg.topic == FEED_DISTANCE_IN:
-        try:
-            d = int(float(val))
-            d = max(0, d)
-            last_distance = d
-            t_distance = time.time()
-            print(f"[distance_input] -> {last_distance} cm")
-        except Exception as e:
-            print(f"[distance_input] invalid '{val}' ({e})")
+    elif msg.topic == FEED_SERVO0:
+        handle_servo0_command(val)
+
+    elif msg.topic == FEED_BUZZER:
+        handle_buzzer_command(val)
 
 # === motors ===
 def _apply_motor(a,b,c,d):
@@ -363,7 +468,6 @@ def _apply_motor(a,b,c,d):
         print("[motor] error:", e)
 
 def _apply_motor_with_sign(sign, a,b,c,d):
-    """Explicit sign override for reverse so it is truly backward regardless of wiring."""
     try:
         car.set_motor_model(sign*a, sign*b, sign*c, sign*d)
     except Exception as e:
@@ -382,7 +486,7 @@ def _maybe_publish_motor_duty(a,b,c,d):
         _last_logged_motor_left = left
         _last_logged_motor_right = right
         combined = f"L={left},R={right}"
-        if _last_pub_motor["combined"] is None or _last_pub_motor["combined"] != combined:
+        if _last_pub_motor["combined"] != combined:
             enqueue_publish(FEED_MOTOR, combined)
             _last_pub_motor["combined"] = combined
     except Exception as e:
@@ -395,7 +499,6 @@ def drive_forward_pct(p):
 
 def drive_backward_pct(p):
     v = pct_to_pwm(p if (running and not emergency_on) else 0)
-    # Force true reverse regardless of FORWARD_SIGN
     _apply_motor_with_sign(-FORWARD_SIGN, v, v, v, v)
     _maybe_publish_motor_duty(-v, -v, -v, -v)
 
@@ -416,29 +519,12 @@ def drive_manual():
     drive_forward_pct(speed_pct)
 
 def drive_line():
-    """Line tracking + obstacle rule (uses operator inputs; distance freshness required, line may be stale)."""
     if not running or emergency_on:
         safe_stop(); return
 
-    now = time.time()
-
-    # Safety gate: distance must be fresh
-    distance_fresh = (last_distance is not None) and ((now - t_distance) <= STALE_SEC)
-    if not distance_fresh:
-        safe_stop(); return
-
     sp = max(0, speed_pct)
+    pos = last_line
 
-    # Obstacle rule
-    if last_distance <= DIST_STOP_CM:
-        safe_stop(); time.sleep(0.1)
-        drive_backward_pct(sp if sp > 0 else 20)
-        time.sleep(REV_MS/1000.0)
-        safe_stop()
-        return
-
-    # Line may be stale; use last-known (default CENTER)
-    pos = (last_line or "CENTER").upper()
     if pos == "CENTER":
         drive_forward_pct(sp)
     elif pos == "LEFT":
@@ -448,15 +534,57 @@ def drive_line():
     else:
         drive_forward_pct(max(20, sp // 2))
 
+def drive_obstacle():
+    if not running or emergency_on:
+        safe_stop(); return
+
+    sp = max(0, speed_pct)
+
+    if last_distance is None:
+        safe_stop(); return
+
+    if last_distance <= DIST_STOP_CM:
+        safe_stop(); time.sleep(0.1)
+        drive_backward_pct(sp if sp > 0 else 25)
+        time.sleep(REV_MS / 1000.0)
+        safe_stop(); time.sleep(0.1)
+        turn_right_pct(max(25, sp))
+        time.sleep(0.35)
+        safe_stop()
+    else:
+        drive_forward_pct(sp)
+
 # === main loop & shutdown ===
 def main_loop():
     global _log_last_write, _log_cur_path, _log_header_written
+    global last_line, last_distance, t_line, t_distance
+
     while not STOP_EVENT.is_set():
         now = time.time()
 
-        if   current_mode == "manual": drive_manual()
-        elif current_mode == "line"  : drive_line()
-        else:                          safe_stop()
+        # refresh real sensors
+        try:
+            last_line = read_line_state()
+            t_line = now
+        except:
+            pass
+
+        try:
+            d = read_distance_cm()
+            if d is not None:
+                last_distance = d
+                t_distance = now
+        except:
+            pass
+
+        if current_mode == "manual":
+            drive_manual()
+        elif current_mode == "line":
+            drive_line()
+        elif current_mode == "obstacle":
+            drive_obstacle()
+        else:
+            safe_stop()
 
         if now - _log_last_write >= 2.0:
             _log_last_write = now
@@ -468,8 +596,8 @@ def main_loop():
                 ensure_csv_header(path)
 
             ts   = iso_now()
-            dist = read_distance_cm()       # simulated telemetry for CSV
-            line = read_line_state()
+            dist = last_distance if last_distance is not None else ""
+            line = last_line
             ml = "" if _last_logged_motor_left  is None else _last_logged_motor_left
             mr = "" if _last_logged_motor_right is None else _last_logged_motor_right
             row = f'{ts},{dist},{line},{int(running)},{int(emergency_on)},{speed_pct},{ml},{mr},'
@@ -486,6 +614,13 @@ def _shutdown_sequence():
     try:
         STOP_EVENT.set()
         safe_stop()
+        buzzer_off()
+        leds_off()
+        try: ir_sensor.close()
+        except: pass
+        try: ultra_sensor.close()
+        except: pass
+
         if client:
             try:
                 flush_publish_queue_now()
@@ -493,16 +628,16 @@ def _shutdown_sequence():
                 client.disconnect()
             except Exception as e:
                 print("[shutdown] mqtt:", e)
+
         if _pub_thread and _pub_thread.is_alive():
             _pub_thread.join(timeout=1.5)
+
         if car and not _car_closed:
             try:
                 car.close(); _car_closed = True
-            except OSError as e:
-                if getattr(e, "errno", None) != 9:
-                    print("[shutdown] car:", e)
             except Exception as e:
                 print("[shutdown] car:", e)
+
     except Exception as e:
         print("[shutdown] general:", e)
 
@@ -533,6 +668,7 @@ if __name__ == "__main__":
         client.on_connect = on_connect
         client.on_disconnect = on_disconnect
         client.on_message = on_message
+
         client.connect("io.adafruit.com", port, 60)
         client.loop_start()
 
