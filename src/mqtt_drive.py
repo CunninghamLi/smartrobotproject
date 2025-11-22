@@ -246,13 +246,18 @@ def _is_on(v: str) -> bool:
     return v in {"on","1","true","start","go","enabled","enable","yes","active"}
 
 # === real sensors ===
+
+# Freenove line sensors usually output: WHITE = 1, BLACK LINE = 0
+# So we invert bits so BLACK = 1 (easier for logic)
+INVERT_LINE_BITS = True
+
 def read_distance_cm():
     try:
         d = ultra_sensor.get_distance()
         if d is None:
             return None
         d = float(d)
-        if d < 0:
+        if d <= 0:
             return None
         return d
     except Exception:
@@ -260,10 +265,16 @@ def read_distance_cm():
 
 def read_line_state():
     try:
-        bits = ir_sensor.read_all_infrared()  # 0 to 7
+        bits = ir_sensor.read_all_infrared()  # gives 0-7
+
         L = (bits >> 2) & 1
         M = (bits >> 1) & 1
         R = bits & 1
+
+        if INVERT_LINE_BITS:
+            L = 1 - L
+            M = 1 - M
+            R = 1 - R
 
         if M == 1 and L == 0 and R == 0:
             return "CENTER"
@@ -275,9 +286,13 @@ def read_line_state():
             return "LEFT"
         if R == 1 and M == 1 and L == 0:
             return "RIGHT"
+        if L == 1 and M == 1 and R == 1:
+            return "CENTER"
+
         return "LOST"
     except Exception:
         return "LOST"
+
 
 def read_camera_status():
     return "online"
@@ -520,7 +535,15 @@ def drive_manual():
 
 def drive_line():
     if not running or emergency_on:
-        safe_stop(); return
+        safe_stop()
+        return
+
+    now = time.time()
+
+    # sensor must be fresh
+    if now - t_line > STALE_SEC:
+        safe_stop()
+        return
 
     sp = max(0, speed_pct)
     pos = last_line
@@ -532,27 +555,39 @@ def drive_line():
     elif pos == "RIGHT":
         turn_right_pct(sp)
     else:
-        drive_forward_pct(max(20, sp // 2))
+        drive_forward_pct(max(18, sp // 2))
 
 def drive_obstacle():
     if not running or emergency_on:
-        safe_stop(); return
+        safe_stop()
+        return
+
+    now = time.time()
+
+    # distance freshness check
+    if last_distance is None or (now - t_distance) > STALE_SEC:
+        safe_stop()
+        return
 
     sp = max(0, speed_pct)
 
-    if last_distance is None:
-        safe_stop(); return
-
     if last_distance <= DIST_STOP_CM:
-        safe_stop(); time.sleep(0.1)
+        safe_stop()
+        time.sleep(0.1)
+
         drive_backward_pct(sp if sp > 0 else 25)
         time.sleep(REV_MS / 1000.0)
-        safe_stop(); time.sleep(0.1)
+
+        safe_stop()
+        time.sleep(0.1)
+
         turn_right_pct(max(25, sp))
         time.sleep(0.35)
+
         safe_stop()
     else:
         drive_forward_pct(sp)
+
 
 # === main loop & shutdown ===
 def main_loop():
