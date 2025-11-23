@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Line Tracking{% endblock %}
+
+{% block content %}
+<h1>Line Tracking Mode</h1>
+
+<div class="card">
+    <p>This sets mode to line and starts the algorithm.</p>
+    <button onclick="startLine()">Start Line Tracking</button>
+    <button onclick="stopLine()">Stop Line Tracking</button>
+</div>
+
+<script>
+function postJSON(url, body){
+    return fetch(url,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+    }).then(r => r.json())
+}
+
+function startLine(){
+    postJSON("/api/mode",{mode:"line"})
+    postJSON("/api/startstop",{state:"on"})
+}
+
+function stopLine(){
+    postJSON("/api/startstop",{state:"off"})
+    postJSON("/api/mode",{mode:"manual"})
+}
+</script>
+{% endblock %}
