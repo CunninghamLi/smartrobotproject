@@ -1,1 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Live Sensors{% endblock %}
+
+{% block content %}
+<h1>Live Sensor Data</h1>
+
+<div class="card">
+    <h3>Distance</h3>
+    <p>{{ distance }} cm</p>
+</div>
+
+<div class="card">
+    <h3>Line Sensor</h3>
+    <p>{{ line }}</p>
+</div>
+
+<div class="card">
+    <h3>Camera Status</h3>
+    <p>{{ camera_status }}</p>
+</div>
+{% endblock %}
 
