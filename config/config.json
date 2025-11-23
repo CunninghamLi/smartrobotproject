@@ -7,7 +7,7 @@
 
     "distance": "smartpath-dot-sensor-dot-distance",
     "line": "smartpath-dot-sensor-dot-line",
-    "motor": "smartpath-dot-motor",
+    "camera": "smartpath-dot-camera-dot-status",
 
     "led": "smartpath-dot-led",
     "servo0": "smartpath-dot-servo0",
