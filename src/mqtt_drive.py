@@ -138,15 +138,44 @@ _last_pub_motor = {"combined": None}
 _shutting_down = False
 _car_closed = False
 
-# sensor state + freshness
+# sensor state
 last_line      = "CENTER"
 last_bits      = 7
 last_distance  = None
 t_line         = 0.0
 t_distance     = 0.0
 STALE_SEC      = 2.0
-DIST_STOP_CM   = 12
+
+DIST_STOP_CM   = 20
 REV_MS         = int(CFG.get("avoid", {}).get("reverse_ms", 350))
+REV_SEC        = 1.5
+
+# obstacle state machine
+obstacle_phase = "clear"   # "clear" | "reversing" | "stopped"
+obstacle_until = 0.0
+
+# distance smoothing window
+distance_window = collections.deque(maxlen=5)
+
+def update_distance_filter(d_raw):
+    """
+    Validate and median filter distance.
+    Keeps only sane numeric values.
+    """
+    if d_raw is None:
+        return None
+    try:
+        d = float(d_raw)
+    except:
+        return None
+    if d <= 0 or d > 400:
+        return None
+
+    distance_window.append(d)
+    if len(distance_window) == 0:
+        return None
+    vals = sorted(distance_window)
+    return vals[len(vals)//2]
 
 # === logging helpers (UTC) ===
 USE_UTC = True
@@ -246,17 +275,23 @@ def pct_to_pwm(p: int) -> int:
 
 MIN_PWM_MOVE = 900
 
+def speed_to_pwm_with_floor(pct: int) -> int:
+    pct = max(0, min(100, int(pct)))
+    if pct == 0:
+        return 0
+    v = pct_to_pwm(pct)
+    if v < MIN_PWM_MOVE:
+        v = MIN_PWM_MOVE
+    return v
+
 def scale_pwm(base: int) -> int:
     s = max(0, min(100, int(speed_pct))) / 100.0
     factor = 0.4 + 0.6 * s
-
     sign = 1 if base >= 0 else -1
     mag = abs(base)
     out = int(mag * factor)
-
     if mag > 0 and out < MIN_PWM_MOVE:
         out = MIN_PWM_MOVE
-
     return sign * out
 
 def safe_stop():
@@ -286,7 +321,6 @@ def _is_on(v: str) -> bool:
     return v in {"on","1","true","start","go","enabled","enable","yes","active"}
 
 # === real sensors ===
-# Start conservative. Change these if your debug shows mismatched patterns.
 INVERT_LINE_BITS = False
 SWAP_LR_BITS = False
 
@@ -316,15 +350,12 @@ def normalize_line_bits(bits_raw: int):
     L = (bits_raw >> 2) & 1
     M = (bits_raw >> 1) & 1
     R = bits_raw & 1
-
     if INVERT_LINE_BITS:
         L = 1 - L
         M = 1 - M
         R = 1 - R
-
     if SWAP_LR_BITS:
         L, R = R, L
-
     return (L << 2) | (M << 1) | R
 
 def read_line_state_from_bits(bits_norm: int):
@@ -352,7 +383,7 @@ def publish_sensors(now):
     _last_sensor_pub_all = now
 
     try:
-        d = read_distance_cm()
+        d = last_distance
         if d is not None:
             enqueue_publish(FEED_DISTANCE, round(d, 2))
     except:
@@ -470,6 +501,7 @@ def on_disconnect(c, u, rc):
 
 def on_message(c, u, msg):
     global running, speed_pct, emergency_on, _was_running_before_emergency, current_mode
+    global obstacle_phase
 
     val = msg.payload.decode(errors="ignore").strip()
     print(f"MSG {msg.topic} -> {val}")
@@ -482,6 +514,10 @@ def on_message(c, u, msg):
         req = _is_on(val)
         running = (req and not emergency_on)
         print(f"[startstop] requested={req} running={running} emergency={emergency_on}")
+
+        if not req:
+            obstacle_phase = "clear"  # allow a fresh obstacle run next start
+
         if not running:
             safe_stop()
 
@@ -509,12 +545,17 @@ def on_message(c, u, msg):
 
     elif msg.topic == FEED_MODE:
         v = val.lower()
+        prev_mode = current_mode
         if v.startswith("line"):
             current_mode = "line"
         elif v.startswith("obstacle"):
             current_mode = "obstacle"
         else:
             current_mode = "manual"
+
+        if prev_mode == "obstacle" and current_mode != "obstacle":
+            obstacle_phase = "clear"
+
         print(f"[mode] -> {current_mode}")
 
     elif msg.topic == FEED_LED:
@@ -528,7 +569,6 @@ def on_message(c, u, msg):
 
 # === motors ===
 def _apply_motor(a,b,c,d):
-    """Used for manual and obstacle, applies FORWARD_SIGN."""
     a*=FORWARD_SIGN; b*=FORWARD_SIGN; c*=FORWARD_SIGN; d*=FORWARD_SIGN
     try:
         car.set_motor_model(a,b,c,d)
@@ -536,17 +576,14 @@ def _apply_motor(a,b,c,d):
         print("[motor] error:", e)
 
 def _apply_motor_raw(a,b,c,d):
-    """Used for Freenove tuned line values. No extra sign flip."""
     try:
         car.set_motor_model(a,b,c,d)
     except Exception as e:
         print("[motor] error:", e)
 
 def _apply_line(a, b, c, d):
-    # apply your car's forward orientation once for line mode
     s = FORWARD_SIGN
     _apply_motor_raw(s*a, s*b, s*c, s*d)
-
 
 def _apply_motor_with_sign(sign, a,b,c,d):
     try:
@@ -574,22 +611,22 @@ def _maybe_publish_motor_duty(a,b,c,d):
         print("[motor_pub] err:", e)
 
 def drive_forward_pct(p):
-    v = pct_to_pwm(p if (running and not emergency_on) else 0)
+    v = speed_to_pwm_with_floor(p if (running and not emergency_on) else 0)
     _apply_motor(v,v,v,v)
     _maybe_publish_motor_duty(v,v,v,v)
 
 def drive_backward_pct(p):
-    v = pct_to_pwm(p if (running and not emergency_on) else 0)
+    v = speed_to_pwm_with_floor(p if (running and not emergency_on) else 0)
     _apply_motor_with_sign(-FORWARD_SIGN, v, v, v, v)
     _maybe_publish_motor_duty(-v, -v, -v, -v)
 
 def turn_left_pct(p):
-    v = pct_to_pwm(p if (running and not emergency_on) else 0)
+    v = speed_to_pwm_with_floor(p if (running and not emergency_on) else 0)
     _apply_motor(int(0.6*v), int(0.6*v), v, v)
     _maybe_publish_motor_duty(int(0.6*v), int(0.6*v), v, v)
 
 def turn_right_pct(p):
-    v = pct_to_pwm(p if (running and not emergency_on) else 0)
+    v = speed_to_pwm_with_floor(p if (running and not emergency_on) else 0)
     _apply_motor(v, v, int(0.6*v), int(0.6*v))
     _maybe_publish_motor_duty(v, v, int(0.6*v), int(0.6*v))
 
@@ -645,7 +682,10 @@ def drive_line():
         safe_stop()
 
 def drive_obstacle():
+    global obstacle_phase, obstacle_until
+
     if not running or emergency_on:
+        obstacle_phase = "clear"
         safe_stop()
         return
 
@@ -656,22 +696,25 @@ def drive_obstacle():
 
     sp = max(0, speed_pct)
 
+    if obstacle_phase == "reversing":
+        if now < obstacle_until:
+            drive_backward_pct(sp if sp > 0 else 25)
+            return
+        safe_stop()
+        obstacle_phase = "stopped"
+        return
+
+    if obstacle_phase == "stopped":
+        safe_stop()
+        return
+
     if last_distance <= DIST_STOP_CM:
         safe_stop()
-        time.sleep(0.1)
+        obstacle_phase = "reversing"
+        obstacle_until = now + REV_SEC
+        return
 
-        drive_backward_pct(sp if sp > 0 else 25)
-        time.sleep(REV_MS / 1000.0)
-
-        safe_stop()
-        time.sleep(0.1)
-
-        turn_right_pct(max(25, sp))
-        time.sleep(0.35)
-
-        safe_stop()
-    else:
-        drive_forward_pct(sp)
+    drive_forward_pct(sp)
 
 # === main loop & shutdown ===
 def main_loop():
@@ -689,13 +732,19 @@ def main_loop():
         except:
             pass
 
+        # distance update with hold-last-good-until-stale
         try:
-            d = read_distance_cm()
-            if d is not None:
-                last_distance = d
-                t_distance = now
+            d_raw = read_distance_cm()
         except:
-            pass
+            d_raw = None
+
+        d_filt = update_distance_filter(d_raw)
+        if d_filt is not None:
+            last_distance = d_filt
+            t_distance = now
+        else:
+            if now - t_distance > STALE_SEC:
+                last_distance = None
 
         if current_mode == "manual":
             drive_manual()
