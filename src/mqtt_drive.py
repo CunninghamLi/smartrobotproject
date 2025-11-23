@@ -72,7 +72,6 @@ FEED_MODE      = feed("mode")
 FEED_DISTANCE  = feed("distance")
 FEED_LINE      = feed("line")
 FEED_CAMERA    = feed("camera") if "camera" in CFG.get("feeds", {}) else None
-FEED_MOTOR     = feed("motor")
 
 FEED_LED     = feed("led")
 FEED_SERVO0  = feed("servo0")
@@ -241,6 +240,9 @@ def enqueue_publish(topic, payload, retain=False, qos=0):
         _publish_queue[topic] = (str(payload), retain, qos)
 
 def flush_publish_queue_now():
+    """
+    Publish oldest first so distance and line do not get starved
+    """
     global _last_pub_time
     now = time.time()
     with _publish_lock:
@@ -248,7 +250,8 @@ def flush_publish_queue_now():
             return
         if now - _last_pub_time < RATE_LIMIT_SECONDS:
             return
-        topic, (payload, retain, qos) = _publish_queue.popitem(last=True)
+        topic, (payload, retain, qos) = _publish_queue.popitem(last=False)
+
     try:
         if client:
             def _do_pub():
@@ -368,10 +371,31 @@ def read_line_state_from_bits(bits_norm: int):
     return "LOST"
 
 def read_camera_status():
-    return "online"
+    """
+    Real camera online check.
+    online if /dev/video device exists or Picamera2 opens.
+    """
+    try:
+        if Path("/dev/video0").exists():
+            return "online"
+        if Path("/dev/v4l/by-id").exists():
+            return "online"
+    except Exception:
+        pass
+
+    try:
+        from picamera2 import Picamera2
+        cam = Picamera2()
+        cam.close()
+        return "online"
+    except Exception:
+        pass
+
+    return "offline"
 
 def read_camera_fps():
-    return 12 + int(3 * math.sin(time.time()/3.0))
+    # you do not have a separate fps feed, so keep None
+    return None
 
 SENSOR_INTERVAL = 2.0
 _last_sensor_pub_all = 0.0
@@ -396,8 +420,8 @@ def publish_sensors(now):
 
     if FEED_CAMERA:
         try:
-            cam_payload = f"status={read_camera_status()},fps={read_camera_fps()}"
-            enqueue_publish(FEED_CAMERA, cam_payload)
+            cam_status = read_camera_status()
+            enqueue_publish(FEED_CAMERA, cam_status)
         except:
             pass
 
@@ -516,7 +540,7 @@ def on_message(c, u, msg):
         print(f"[startstop] requested={req} running={running} emergency={emergency_on}")
 
         if not req:
-            obstacle_phase = "clear"  # allow a fresh obstacle run next start
+            obstacle_phase = "clear"
 
         if not running:
             safe_stop()
@@ -605,7 +629,6 @@ def _maybe_publish_motor_duty(a,b,c,d):
         _last_logged_motor_right = right
         combined = f"L={left},R={right}"
         if _last_pub_motor["combined"] != combined:
-            enqueue_publish(FEED_MOTOR, combined)
             _last_pub_motor["combined"] = combined
     except Exception as e:
         print("[motor_pub] err:", e)
