@@ -74,7 +74,6 @@ FEED_LINE      = feed("line")
 FEED_CAMERA    = feed("camera") if "camera" in CFG.get("feeds", {}) else None
 FEED_MOTOR     = feed("motor")
 
-# New control feeds
 FEED_LED     = feed("led")
 FEED_SERVO0  = feed("servo0")
 FEED_BUZZER  = feed("buzzer")
@@ -102,11 +101,36 @@ car             = None
 client          = None
 _pub_thread     = None
 
-led_obj         = Led()
-servo_obj       = Servo()
-buzzer_obj      = Buzzer()
-ir_sensor       = Infrared()
-ultra_sensor    = Ultrasonic()
+# Instantiate device objects
+try:
+    led_obj = Led()
+except Exception as e:
+    led_obj = None
+    print("[init] LED init error:", e)
+
+try:
+    servo_obj = Servo()
+except Exception as e:
+    servo_obj = None
+    print("[init] Servo init error:", e)
+
+try:
+    buzzer_obj = Buzzer()
+except Exception as e:
+    buzzer_obj = None
+    print("[init] Buzzer init error:", e)
+
+try:
+    ir_sensor = Infrared()
+except Exception as e:
+    ir_sensor = None
+    print("[init] Infrared init error:", e)
+
+try:
+    ultra_sensor = Ultrasonic()
+except Exception as e:
+    ultra_sensor = None
+    print("[init] Ultrasonic init error:", e)
 
 _last_pub_time_motor = 0.0
 _last_pub_motor = {"combined": None}
@@ -116,6 +140,7 @@ _car_closed = False
 
 # sensor state + freshness
 last_line      = "CENTER"
+last_bits      = 7
 last_distance  = None
 t_line         = 0.0
 t_distance     = 0.0
@@ -219,6 +244,21 @@ def pct_to_pwm(p: int) -> int:
     p = max(0, min(100, int(p)))
     return int(round(p * 4095 / 100))
 
+MIN_PWM_MOVE = 900
+
+def scale_pwm(base: int) -> int:
+    s = max(0, min(100, int(speed_pct))) / 100.0
+    factor = 0.4 + 0.6 * s
+
+    sign = 1 if base >= 0 else -1
+    mag = abs(base)
+    out = int(mag * factor)
+
+    if mag > 0 and out < MIN_PWM_MOVE:
+        out = MIN_PWM_MOVE
+
+    return sign * out
+
 def safe_stop():
     global _car_closed
     try:
@@ -246,12 +286,13 @@ def _is_on(v: str) -> bool:
     return v in {"on","1","true","start","go","enabled","enable","yes","active"}
 
 # === real sensors ===
-
-# Freenove line sensors usually output: WHITE = 1, BLACK LINE = 0
-# So we invert bits so BLACK = 1 (easier for logic)
-INVERT_LINE_BITS = True
+# Start conservative. Change these if your debug shows mismatched patterns.
+INVERT_LINE_BITS = False
+SWAP_LR_BITS = False
 
 def read_distance_cm():
+    if ultra_sensor is None:
+        return None
     try:
         d = ultra_sensor.get_distance()
         if d is None:
@@ -263,36 +304,37 @@ def read_distance_cm():
     except Exception:
         return None
 
-def read_line_state():
+def read_line_bits_raw():
+    if ir_sensor is None:
+        return 7
     try:
-        bits = ir_sensor.read_all_infrared()  # gives 0-7
-
-        L = (bits >> 2) & 1
-        M = (bits >> 1) & 1
-        R = bits & 1
-
-        if INVERT_LINE_BITS:
-            L = 1 - L
-            M = 1 - M
-            R = 1 - R
-
-        if M == 1 and L == 0 and R == 0:
-            return "CENTER"
-        if L == 1 and M == 0 and R == 0:
-            return "LEFT"
-        if R == 1 and M == 0 and L == 0:
-            return "RIGHT"
-        if L == 1 and M == 1 and R == 0:
-            return "LEFT"
-        if R == 1 and M == 1 and L == 0:
-            return "RIGHT"
-        if L == 1 and M == 1 and R == 1:
-            return "CENTER"
-
-        return "LOST"
+        return ir_sensor.read_all_infrared() & 0x07
     except Exception:
-        return "LOST"
+        return 7
 
+def normalize_line_bits(bits_raw: int):
+    L = (bits_raw >> 2) & 1
+    M = (bits_raw >> 1) & 1
+    R = bits_raw & 1
+
+    if INVERT_LINE_BITS:
+        L = 1 - L
+        M = 1 - M
+        R = 1 - R
+
+    if SWAP_LR_BITS:
+        L, R = R, L
+
+    return (L << 2) | (M << 1) | R
+
+def read_line_state_from_bits(bits_norm: int):
+    if bits_norm == 2:
+        return "CENTER"
+    if bits_norm in (4, 6):
+        return "LEFT"
+    if bits_norm in (1, 3):
+        return "RIGHT"
+    return "LOST"
 
 def read_camera_status():
     return "online"
@@ -317,7 +359,7 @@ def publish_sensors(now):
         pass
 
     try:
-        enqueue_publish(FEED_LINE, read_line_state())
+        enqueue_publish(FEED_LINE, last_line)
     except:
         pass
 
@@ -328,8 +370,10 @@ def publish_sensors(now):
         except:
             pass
 
-# === LED helpers (Option A) ===
+# === LED helpers ===
 def leds_off():
+    if led_obj is None:
+        return
     try:
         led_obj.colorBlink(0)
         led_obj.ledIndex(0x00, 0, 0, 0)
@@ -337,6 +381,8 @@ def leds_off():
         print("[led] off error:", e)
 
 def leds_color(r, g, b):
+    if led_obj is None:
+        return
     try:
         led_obj.ledIndex(0xFF, int(r), int(g), int(b))
     except Exception as e:
@@ -357,8 +403,10 @@ def handle_led_command(val: str):
     else:
         print("[led] unknown command:", val)
 
-# === Servo helpers (Option A, channel 0) ===
+# === Servo helpers ===
 def handle_servo0_command(val: str):
+    if servo_obj is None:
+        return
     v = val.strip().lower()
     try:
         if v in {"left", "0"}:
@@ -376,12 +424,16 @@ def handle_servo0_command(val: str):
 
 # === Buzzer helpers ===
 def buzzer_off():
+    if buzzer_obj is None:
+        return
     try:
         buzzer_obj.set_state(False)
     except Exception as e:
         print("[buzzer] off error:", e)
 
 def buzzer_on():
+    if buzzer_obj is None:
+        return
     try:
         buzzer_obj.set_state(True)
     except Exception as e:
@@ -476,11 +528,25 @@ def on_message(c, u, msg):
 
 # === motors ===
 def _apply_motor(a,b,c,d):
+    """Used for manual and obstacle, applies FORWARD_SIGN."""
     a*=FORWARD_SIGN; b*=FORWARD_SIGN; c*=FORWARD_SIGN; d*=FORWARD_SIGN
     try:
         car.set_motor_model(a,b,c,d)
     except Exception as e:
         print("[motor] error:", e)
+
+def _apply_motor_raw(a,b,c,d):
+    """Used for Freenove tuned line values. No extra sign flip."""
+    try:
+        car.set_motor_model(a,b,c,d)
+    except Exception as e:
+        print("[motor] error:", e)
+
+def _apply_line(a, b, c, d):
+    # apply your car's forward orientation once for line mode
+    s = FORWARD_SIGN
+    _apply_motor_raw(s*a, s*b, s*c, s*d)
+
 
 def _apply_motor_with_sign(sign, a,b,c,d):
     try:
@@ -530,7 +596,8 @@ def turn_right_pct(p):
 # === behavior modes ===
 def drive_manual():
     if not running or emergency_on:
-        safe_stop(); return
+        safe_stop()
+        return
     drive_forward_pct(speed_pct)
 
 def drive_line():
@@ -539,23 +606,43 @@ def drive_line():
         return
 
     now = time.time()
-
-    # sensor must be fresh
     if now - t_line > STALE_SEC:
         safe_stop()
         return
 
-    sp = max(0, speed_pct)
-    pos = last_line
+    bits = last_bits
 
-    if pos == "CENTER":
-        drive_forward_pct(sp)
-    elif pos == "LEFT":
-        turn_left_pct(sp)
-    elif pos == "RIGHT":
-        turn_right_pct(sp)
+    if bits == 2:
+        v = scale_pwm(800)
+        _apply_line(v, v, v, v)
+        _maybe_publish_motor_duty(v, v, v, v)
+
+    elif bits == 4:
+        a = scale_pwm(-1500)
+        b = scale_pwm(2500)
+        _apply_line(a, a, b, b)
+        _maybe_publish_motor_duty(a, a, b, b)
+
+    elif bits == 6:
+        a = scale_pwm(-2000)
+        b = scale_pwm(4000)
+        _apply_line(a, a, b, b)
+        _maybe_publish_motor_duty(a, a, b, b)
+
+    elif bits == 1:
+        a = scale_pwm(2500)
+        b = scale_pwm(-1500)
+        _apply_line(a, a, b, b)
+        _maybe_publish_motor_duty(a, a, b, b)
+
+    elif bits == 3:
+        a = scale_pwm(4000)
+        b = scale_pwm(-2000)
+        _apply_line(a, a, b, b)
+        _maybe_publish_motor_duty(a, a, b, b)
+
     else:
-        drive_forward_pct(max(18, sp // 2))
+        safe_stop()
 
 def drive_obstacle():
     if not running or emergency_on:
@@ -563,8 +650,6 @@ def drive_obstacle():
         return
 
     now = time.time()
-
-    # distance freshness check
     if last_distance is None or (now - t_distance) > STALE_SEC:
         safe_stop()
         return
@@ -588,18 +673,18 @@ def drive_obstacle():
     else:
         drive_forward_pct(sp)
 
-
 # === main loop & shutdown ===
 def main_loop():
     global _log_last_write, _log_cur_path, _log_header_written
-    global last_line, last_distance, t_line, t_distance
+    global last_line, last_distance, t_line, t_distance, last_bits
 
     while not STOP_EVENT.is_set():
         now = time.time()
 
-        # refresh real sensors
         try:
-            last_line = read_line_state()
+            bits_raw = read_line_bits_raw()
+            last_bits = normalize_line_bits(bits_raw)
+            last_line = read_line_state_from_bits(last_bits)
             t_line = now
         except:
             pass
@@ -651,10 +736,14 @@ def _shutdown_sequence():
         safe_stop()
         buzzer_off()
         leds_off()
-        try: ir_sensor.close()
-        except: pass
-        try: ultra_sensor.close()
-        except: pass
+        try:
+            if ir_sensor: ir_sensor.close()
+        except:
+            pass
+        try:
+            if ultra_sensor and hasattr(ultra_sensor, "close"): ultra_sensor.close()
+        except:
+            pass
 
         if client:
             try:
@@ -669,7 +758,8 @@ def _shutdown_sequence():
 
         if car and not _car_closed:
             try:
-                car.close(); _car_closed = True
+                car.close()
+                _car_closed = True
             except Exception as e:
                 print("[shutdown] car:", e)
 
@@ -714,3 +804,4 @@ if __name__ == "__main__":
     finally:
         _shutdown_sequence()
         print("Bye.")
+
