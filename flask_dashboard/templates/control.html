@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Control Car{% endblock %}
+
+{% block content %}
+<h1>Control Car</h1>
+
+<div class="card">
+    <h3>Start or Stop</h3>
+    <button onclick="setStartStop('on')">Start</button>
+    <button onclick="setStartStop('off')">Stop</button>
+</div>
+
+<div class="card">
+    <h3>Speed</h3>
+    <input id="speedSlider" type="range" min="0" max="100" value="35" oninput="updateSpeedLabel(this.value)">
+    <p>Speed: <span id="speedVal">35</span>%</p>
+    <button onclick="sendSpeed()">Send Speed</button>
+</div>
+
+<div class="card">
+    <h3>Manual Direction</h3>
+    <p>If your motor feed is connected, these work.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button onclick="motorCmd('forward')">Forward</button>
+        <button onclick="motorCmd('backward')">Backward</button>
+        <button onclick="motorCmd('left')">Left</button>
+        <button onclick="motorCmd('right')">Right</button>
+        <button onclick="motorCmd('stop')">Stop Motors</button>
+    </div>
+</div>
+
+<script>
+function postJSON(url, body){
+    return fetch(url,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+    }).then(r => r.json())
+}
+
+function setStartStop(state){
+    postJSON("/api/startstop",{state})
+}
+
+function updateSpeedLabel(v){
+    document.getElementById("speedVal").innerText = v
+}
+
+function sendSpeed(){
+    const v = Number(document.getElementById("speedSlider").value)
+    postJSON("/api/speed",{speed:v})
+}
+
+function motorCmd(cmd){
+    postJSON("/api/motor",{cmd})
+        .then(res => {
+            if(!res.ok){
+                alert(res.error || "motor feed not set")
+            }
+        })
+}
+</script>
+{% endblock %}
