@@ -1,1 +1,44 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0f1115;
+    color: white;
+}
+
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    background: #181b22;
+    border-bottom: 1px solid #2a2f3a;
+}
+
+.nav-brand {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.nav-links a {
+    margin-left: 14px;
+    text-decoration: none;
+    color: white;
+    font-size: 15px;
+}
+
+.nav-links a:hover {
+    color: #4aa3ff;
+}
+
+.container {
+    padding: 20px;
+}
+
+.card {
+    background: #181b22;
+    padding: 15px;
+    margin-top: 12px;
+    border-radius: 10px;
+    border: 1px solid #2a2f3a;
+}
 
