@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Obstacle Avoidance{% endblock %}
+
+{% block content %}
+<h1>Obstacle Avoidance Mode</h1>
+
+<div class="card">
+    <p>This sets mode to obstacle and starts the algorithm.</p>
+    <button onclick="startObstacle()">Start Obstacle Avoidance</button>
+    <button onclick="stopObstacle()">Stop Obstacle Avoidance</button>
+</div>
+
+<script>
+function postJSON(url, body){
+    return fetch(url,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+    }).then(r => r.json())
+}
+
+function startObstacle(){
+    postJSON("/api/mode",{mode:"obstacle"})
+    postJSON("/api/startstop",{state:"on"})
+}
+
+function stopObstacle(){
+    postJSON("/api/startstop",{state:"off"})
+    postJSON("/api/mode",{mode:"manual"})
+}
+</script>
+{% endblock %}
