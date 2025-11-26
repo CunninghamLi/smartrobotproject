@@ -95,8 +95,10 @@ def obstacle_page():
 def history():
     """
     Pick a date and load historical sensor data (distance) from Neon.
+    Table: sensor_readings
+    Columns: ts (timestamptz), distance_cm (numeric/float)
     """
-    selected_date = request.args.get("date")  # YYYY-MM-DD
+    selected_date = request.args.get("date")  # from <input type="date">
 
     labels = []
     distance_data = []
@@ -106,12 +108,12 @@ def history():
             conn = get_db_connection()
             cur = conn.cursor()
 
-            # Adjust column names if your table is different
+            # Convert ts to America/Toronto date so it matches what you pick in the browser
             cur.execute(
                 """
                 SELECT ts, distance_cm
                 FROM sensor_readings
-                WHERE ts::date = %s
+                WHERE (ts AT TIME ZONE 'America/Toronto')::date = %s::date
                 ORDER BY ts
                 """,
                 (selected_date,)
@@ -120,9 +122,13 @@ def history():
             cur.close()
             conn.close()
 
+            print(f"[history] date={selected_date} rows={len(rows)}")
+
             for row in rows:
-                ts = row["ts"]          # datetime
+                ts = row["ts"]          # datetime from Neon
                 val = row["distance_cm"]
+
+                # Show time-of-day on x-axis
                 labels.append(ts.strftime("%H:%M:%S"))
                 distance_data.append(val if val is not None else None)
 
@@ -135,6 +141,7 @@ def history():
         labels=labels,
         distance_data=distance_data
     )
+
 
 
 # ---------- API endpoints ----------
