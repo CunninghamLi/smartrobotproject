@@ -19,8 +19,7 @@ MODE_FEED      = "smartpath-dot-mode"
 LED_FEED    = "smartpath-dot-led"
 BUZZER_FEED = "smartpath-dot-buzzer"
 
-# Optional motor feed
-MOTOR_FEED = os.getenv("MOTOR_FEED_KEY", "").strip()
+MOTOR_FEED = "smartpath-dot-motor"
 
 @app.route("/")
 def home():
