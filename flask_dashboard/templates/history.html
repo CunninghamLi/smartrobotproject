@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+
+{% block content %}
+<h1>Historical Sensor Data</h1>
+
+<div class="card">
+    <h3>Select a date</h3>
+    <form method="get" action="{{ url_for('history') }}">
+        <label for="date">Date:</label>
+        <input
+            type="date"
+            id="date"
+            name="date"
+            value="{{ selected_date or '' }}"
+            required
+        >
+        <button type="submit">Load data</button>
+    </form>
+    <p style="margin-top:0.5rem; font-size:0.9rem;">
+        This queries the Neon database and plots distance readings over time for that day.
+    </p>
+</div>
+
+{% if selected_date %}
+    {% if labels and distance_data %}
+        <div class="card" style="margin-top: 1rem;">
+            <h3>Distance over time for {{ selected_date }}</h3>
+            <canvas id="historyDistanceChart" height="120"></canvas>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script>
+            const historyLabels = {{ labels|tojson }};
+            const historyDistanceData = {{ distance_data|tojson }};
+
+            const hctx = document.getElementById('historyDistanceChart').getContext('2d');
+            const historyChart = new Chart(hctx, {
+                type: 'line',
+                data: {
+                    labels: historyLabels,
+                    datasets: [{
+                        label: 'Distance (cm)',
+                        data: historyDistanceData,
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time (HH:MM:SS)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Distance (cm)'
+                            }
+                        }
+                    }
+                }
+            });
+        </script>
+    {% else %}
+        <div class="card" style="margin-top: 1rem;">
+            <p>No data found for {{ selected_date }}.</p>
+        </div>
+    {% endif %}
+{% endif %}
+{% endblock %}
