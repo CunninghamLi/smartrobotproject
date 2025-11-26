@@ -18,6 +18,19 @@
 </div>
 
 <div class="card">
+    <h3>LED</h3>
+    <button onclick="setLed('on')">On</button>
+    <button onclick="setLed('off')">Off</button>
+</div>
+
+<div class="card">
+    <h3>Buzzer</h3>
+    <button onclick="setBuzzer('on')">On</button>
+    <button onclick="setBuzzer('off')">Off</button>
+    <button onclick="setBuzzer('beep')">Beep</button>
+</div>
+
+<div class="card">
     <h3>Manual Direction</h3>
     <p>If your motor feed is connected, these work.</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -49,6 +62,14 @@ function updateSpeedLabel(v){
 function sendSpeed(){
     const v = Number(document.getElementById("speedSlider").value)
     postJSON("/api/speed",{speed:v})
+}
+
+function setLed(cmd){
+    postJSON("/api/led",{cmd})
+}
+
+function setBuzzer(cmd){
+    postJSON("/api/buzzer",{cmd})
 }
 
 function motorCmd(cmd){
