@@ -10,23 +10,41 @@
     <button onclick="stopLine()">Stop Line Tracking</button>
 </div>
 
+<div class="card">
+    <h3>Speed for Line Tracking</h3>
+    <input id="speedSlider" type="range" min="0" max="100" value="35" oninput="updateSpeedLabel(this.value)">
+    <p>Speed: <span id="speedVal">35</span>%</p>
+    <button onclick="sendSpeed()">Send Speed</button>
+</div>
+
 <script>
 function postJSON(url, body){
-    return fetch(url,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(body)
-    }).then(r => r.json())
+    return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+    }).then(r => r.json());
 }
 
 function startLine(){
-    postJSON("/api/mode",{mode:"line"})
-    postJSON("/api/startstop",{state:"on"})
+    // set mode to line, then start
+    postJSON("/api/mode", {mode: "line"});
+    postJSON("/api/startstop", {state: "on"});
 }
 
 function stopLine(){
-    postJSON("/api/startstop",{state:"off"})
-    postJSON("/api/mode",{mode:"manual"})
+    // stop motors and go back to manual mode
+    postJSON("/api/startstop", {state: "off"});
+    postJSON("/api/mode", {mode: "manual"});
+}
+
+function updateSpeedLabel(v){
+    document.getElementById("speedVal").innerText = v;
+}
+
+function sendSpeed(){
+    const v = Number(document.getElementById("speedSlider").value);
+    postJSON("/api/speed", {speed: v});
 }
 </script>
 {% endblock %}
