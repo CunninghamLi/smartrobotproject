@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 import os
@@ -15,9 +16,11 @@ STARTSTOP_FEED = "smartpath-dot-startstop"
 SPEED_FEED     = "smartpath-dot-speed"
 MODE_FEED      = "smartpath-dot-mode"
 
-# If you already have a motor direction feed, put it here
-# Example name only, change to your real one if needed
-MOTOR_FEED = os.getenv("MOTOR_FEED_KEY", "").strip()  # optional
+LED_FEED    = "smartpath-dot-led"
+BUZZER_FEED = "smartpath-dot-buzzer"
+
+# Optional motor feed
+MOTOR_FEED = os.getenv("MOTOR_FEED_KEY", "").strip()
 
 @app.route("/")
 def home():
@@ -64,12 +67,13 @@ def obstacle_page():
     return render_template("obstacle.html")
 
 
-# ---------- API endpoints used by pages ----------
+# ---------- API endpoints ----------
 
 @app.post("/api/startstop")
 def api_startstop():
     data = request.get_json(force=True)
     state = data.get("state", "off")
+    print("[api/startstop]", state)
     try:
         publish_value(STARTSTOP_FEED, state)
         return jsonify(ok=True)
@@ -80,6 +84,7 @@ def api_startstop():
 def api_speed():
     data = request.get_json(force=True)
     speed = data.get("speed", 35)
+    print("[api/speed]", speed)
     try:
         publish_value(SPEED_FEED, speed)
         return jsonify(ok=True)
@@ -90,21 +95,42 @@ def api_speed():
 def api_mode():
     data = request.get_json(force=True)
     mode = data.get("mode", "manual")
+    print("[api/mode]", mode)
     try:
         publish_value(MODE_FEED, mode)
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
+@app.post("/api/led")
+def api_led():
+    data = request.get_json(force=True)
+    cmd = data.get("cmd", "off")
+    print("[api/led]", cmd)
+    try:
+        publish_value(LED_FEED, cmd)
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
+@app.post("/api/buzzer")
+def api_buzzer():
+    data = request.get_json(force=True)
+    cmd = data.get("cmd", "off")
+    print("[api/buzzer]", cmd)
+    try:
+        publish_value(BUZZER_FEED, cmd)
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
 @app.post("/api/motor")
 def api_motor():
-    """
-    Optional. Only works if you have a motor feed and mqtt_drive subscribes to it.
-    """
     if not MOTOR_FEED:
         return jsonify(ok=False, error="MOTOR_FEED_KEY not set"), 400
     data = request.get_json(force=True)
     cmd = data.get("cmd", "stop")
+    print("[api/motor]", cmd)
     try:
         publish_value(MOTOR_FEED, cmd)
         return jsonify(ok=True)
@@ -114,4 +140,3 @@ def api_motor():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
-
