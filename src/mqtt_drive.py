@@ -1114,4 +1114,3 @@ if __name__ == "__main__":
     finally:
         _shutdown_sequence()
         print("Bye.")
-
