@@ -10,7 +10,7 @@
     "camera": "smartpath-dot-camera-dot-status",
 
     "led": "smartpath-dot-led",
-    "servo0": "smartpath-dot-servo0",
+    "motor": "smartpath-dot-motor",
     "buzzer": "smartpath-dot-buzzer"
   },
   "avoid": {
