@@ -1,9 +1,66 @@
 {% extends "base.html" %}
-
 {% block title %}About{% endblock %}
 
 {% block content %}
-<h1>About SmartPath</h1>
-<p>This dashboard connects to Adafruit IO to show live sensors and control the robot.</p>
-{% endblock %}
 
+<h1>About SmartPath</h1>
+
+<p class="subtitle">
+SmartPath is a Raspberry Pi powered robotic platform designed for live control,
+real-time sensor monitoring, and autonomous navigation.
+</p>
+
+<div class="about-section">
+
+    <h2>What SmartPath Can Do</h2>
+    <ul>
+        <li>Live distance, line, and camera sensor monitoring</li>
+        <li>Manual driving with motor controls</li>
+        <li>LED and buzzer control through Adafruit IO</li>
+        <li>Line Tracking mode using infrared sensors</li>
+        <li>Obstacle Avoidance mode using an ultrasonic sensor</li>
+        <li>Flask dashboard for UI control</li>
+        <li>MQTT communication between the Pi and Adafruit IO</li>
+    </ul>
+
+    <h2>System Architecture</h2>
+    <p>
+        The robot communicates through Adafruit IO using MQTT.  
+        The Raspberry Pi runs a control program that receives commands (start, stop, speed,
+        direction, mode) and drives the motors accordingly.  
+        At the same time, it continuously sends sensor data (distance, line state, camera
+        status) back to the cloud.
+    </p>
+
+    <h2>Web Dashboard</h2>
+    <p>
+        The Flask dashboard provides a clean interface for controlling the car:
+    </p>
+    <ul>
+        <li>Control Panel for motors, LED, and buzzer</li>
+        <li>Pages for Line Tracking and Obstacle Avoidance</li>
+        <li>Live charts for sensor readings</li>
+        <li>Historical sensor graphs (database integration coming soon)</li>
+    </ul>
+
+</div>
+
+<style>
+.subtitle {
+    margin-bottom:15px;
+    color:#555;
+}
+.about-section h2 {
+    margin-top:25px;
+    font-size:22px;
+}
+.about-section ul {
+    margin-left:20px;
+    margin-bottom:15px;
+}
+.about-section p {
+    margin-bottom:15px;
+}
+</style>
+
+{% endblock %}
