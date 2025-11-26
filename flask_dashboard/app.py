@@ -2,6 +2,7 @@
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 import os
+import time
 
 from adafruit_client import get_latest, publish_value
 
@@ -33,17 +34,17 @@ def about():
 def sensors():
     try:
         distance = get_latest(DIST_FEED)
-    except:
+    except Exception:
         distance = "N/A"
 
     try:
         line = get_latest(LINE_FEED)
-    except:
+    except Exception:
         line = "N/A"
 
     try:
         camera_status = get_latest(CAM_FEED)
-    except:
+    except Exception:
         camera_status = "N/A"
 
     return render_template(
@@ -64,6 +65,33 @@ def line_page():
 @app.route("/obstacle")
 def obstacle_page():
     return render_template("obstacle.html")
+
+
+# ---------- Live sensors API for Chart.js polling ----------
+
+@app.get("/api/live-sensors")
+def api_live_sensors():
+    try:
+        distance = get_latest(DIST_FEED)
+    except Exception:
+        distance = None
+
+    try:
+        line = get_latest(LINE_FEED)
+    except Exception:
+        line = None
+
+    try:
+        camera_status = get_latest(CAM_FEED)
+    except Exception:
+        camera_status = None
+
+    return jsonify(
+        distance=distance,
+        line=line,
+        camera_status=camera_status,
+        ts=time.time()
+    )
 
 
 # ---------- API endpoints ----------
@@ -125,8 +153,7 @@ def api_buzzer():
 
 @app.post("/api/motor")
 def api_motor():
-    if not MOTOR_FEED:
-        return jsonify(ok=False, error="MOTOR_FEED_KEY not set"), 400
+    # MOTOR_FEED is hard coded above, so this should always be set
     data = request.get_json(force=True)
     cmd = data.get("cmd", "stop")
     print("[api/motor]", cmd)
