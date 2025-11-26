@@ -5,6 +5,19 @@
 <h1>Control Car</h1>
 
 <div class="card">
+    <h3>Mode</h3>
+    <p>Select how the car should behave when Start is ON.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button onclick="setMode('manual')">Manual</button>
+        <button onclick="setMode('control')">Control</button>
+    </div>
+    <small>
+        Manual and Control both go through the same mode feed.
+        Your mqtt_drive.py will decide what to do with each value.
+    </small>
+</div>
+
+<div class="card">
     <h3>Start or Stop</h3>
     <button onclick="setStartStop('on')">Start</button>
     <button onclick="setStartStop('off')">Stop</button>
@@ -18,21 +31,8 @@
 </div>
 
 <div class="card">
-    <h3>LED</h3>
-    <button onclick="setLed('on')">On</button>
-    <button onclick="setLed('off')">Off</button>
-</div>
-
-<div class="card">
-    <h3>Buzzer</h3>
-    <button onclick="setBuzzer('on')">On</button>
-    <button onclick="setBuzzer('off')">Off</button>
-    <button onclick="setBuzzer('beep')">Beep</button>
-</div>
-
-<div class="card">
     <h3>Manual Direction</h3>
-    <p>If your motor feed is connected, these work.</p>
+    <p>These send commands on the motor feed used by mqtt_drive.py.</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button onclick="motorCmd('forward')">Forward</button>
         <button onclick="motorCmd('backward')">Backward</button>
@@ -42,43 +42,89 @@
     </div>
 </div>
 
+<div class="card">
+    <h3>LED</h3>
+    <p>Controls the LED strip via the smartpath dot led feed.</p>
+    <button onclick="setLed('on')">LED ON</button>
+    <button onclick="setLed('off')">LED OFF</button>
+</div>
+
+<div class="card">
+    <h3>Buzzer</h3>
+    <p>Simple buzzer control.</p>
+    <button onclick="setBuzzer('on')">Buzzer ON</button>
+    <button onclick="setBuzzer('off')">Buzzer OFF</button>
+    <button onclick="setBuzzer('beep')">Beep</button>
+</div>
+
 <script>
-function postJSON(url, body){
-    return fetch(url,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(body)
-    }).then(r => r.json())
+function postJSON(url, body) {
+    return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+    }).then(r => r.json());
 }
 
-function setStartStop(state){
-    postJSON("/api/startstop",{state})
-}
-
-function updateSpeedLabel(v){
-    document.getElementById("speedVal").innerText = v
-}
-
-function sendSpeed(){
-    const v = Number(document.getElementById("speedSlider").value)
-    postJSON("/api/speed",{speed:v})
-}
-
-function setLed(cmd){
-    postJSON("/api/led",{cmd})
-}
-
-function setBuzzer(cmd){
-    postJSON("/api/buzzer",{cmd})
-}
-
-function motorCmd(cmd){
-    postJSON("/api/motor",{cmd})
+// MODE
+function setMode(mode) {
+    postJSON("/api/mode", { mode })
         .then(res => {
-            if(!res.ok){
-                alert(res.error || "motor feed not set")
+            if (!res.ok) {
+                alert(res.error || "Failed to set mode");
             }
         })
+        .catch(err => console.error("setMode error", err));
+}
+
+// START / STOP
+function setStartStop(state) {
+    postJSON("/api/startstop", { state })
+        .catch(err => console.error("setStartStop error", err));
+}
+
+// SPEED
+function updateSpeedLabel(v) {
+    document.getElementById("speedVal").innerText = v;
+}
+
+function sendSpeed() {
+    const v = Number(document.getElementById("speedSlider").value);
+    postJSON("/api/speed", { speed: v })
+        .catch(err => console.error("sendSpeed error", err));
+}
+
+// MOTOR
+function motorCmd(cmd) {
+    postJSON("/api/motor", { cmd })
+        .then(res => {
+            if (!res.ok) {
+                alert(res.error || "Motor feed not set");
+            }
+        })
+        .catch(err => console.error("motorCmd error", err));
+}
+
+// LED
+function setLed(cmd) {
+    postJSON("/api/led", { cmd })
+        .then(res => {
+            if (!res.ok) {
+                alert(res.error || "LED error");
+            }
+        })
+        .catch(err => console.error("setLed error", err));
+}
+
+// BUZZER
+function setBuzzer(cmd) {
+    postJSON("/api/buzzer", { cmd })
+        .then(res => {
+            if (!res.ok) {
+                alert(res.error || "Buzzer error");
+            }
+        })
+        .catch(err => console.error("setBuzzer error", err));
 }
 </script>
 {% endblock %}
