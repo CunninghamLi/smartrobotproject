@@ -5,115 +5,138 @@
 {% block content %}
 <h1>Live Sensor Data</h1>
 
-<div class="card">
-    <h3>Distance (live chart)</h3>
-    <canvas id="distanceChart" height="120"></canvas>
-    <p>
-        Current distance:
-        <strong><span id="distanceVal">{{ distance }}</span></strong> cm
-    </p>
+<div class="cards-grid">
+    <div class="card">
+        <h3>Distance</h3>
+        <p>
+            <span id="distanceValue">{{ distance }}</span>
+            <span id="distanceUnit">cm</span>
+        </p>
+    </div>
+
+    <div class="card">
+        <h3>Line Sensor</h3>
+        <p id="lineValue">{{ line }}</p>
+    </div>
+
+    <div class="card">
+        <h3>Camera Status</h3>
+        <p id="cameraValue">{{ camera_status }}</p>
+    </div>
 </div>
 
-<div class="card">
-    <h3>Line Sensor</h3>
-    <p>
-        Current line state:
-        <strong><span id="lineVal">{{ line }}</span></strong>
+<div class="card" style="margin-top: 1.5rem;">
+    <h3>Distance over time (live)</h3>
+    <p style="font-size:0.9rem; color:#666;">
+        This chart refreshes every 3 seconds using Adafruit IO via the Flask API.
     </p>
-    <small>Typical values: CENTER, LEFT, RIGHT, LOST</small>
+    <canvas id="liveDistanceChart" height="120"></canvas>
 </div>
 
-<div class="card">
-    <h3>Camera Status</h3>
-    <p>
-        Current camera:
-        <strong><span id="cameraVal">{{ camera_status }}</span></strong>
-    </p>
-</div>
-
-<!-- Chart.js from CDN -->
+<!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-function postJSON(url, body){
-    return fetch(url, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body)
-    }).then(r => r.json());
-}
+const labels = [];
+const distanceSeries = [];
 
-// Distance chart setup
-const distanceLabels = [];
-const distanceData = [];
+const ctx = document.getElementById('liveDistanceChart').getContext('2d');
 
-const ctx = document.getElementById("distanceChart").getContext("2d");
 const distanceChart = new Chart(ctx, {
-    type: "line",
+    type: 'line',
     data: {
-        labels: distanceLabels,
+        labels: labels,
         datasets: [{
-            label: "Distance (cm)",
-            data: distanceData,
-            tension: 0.2,
+            label: 'Distance (cm)',
+            data: distanceSeries,
             borderWidth: 2,
-            pointRadius: 2
+            tension: 0.2,
+            pointRadius: 0
         }]
     },
     options: {
-        responsive: true,
+        animation: false,
         scales: {
             x: {
-                title: {display: true, text: "Time"}
+                title: {
+                    display: true,
+                    text: 'Reading'
+                }
             },
             y: {
                 beginAtZero: true,
-                title: {display: true, text: "Distance (cm)"}
+                title: {
+                    display: true,
+                    text: 'Distance (cm)'
+                }
             }
         }
     }
 });
 
-function updateText(distance, line, cameraStatus){
-    const d = document.getElementById("distanceVal");
-    const l = document.getElementById("lineVal");
-    const c = document.getElementById("cameraVal");
+function addPointToChart(dist) {
+    const tsLabel = new Date().toLocaleTimeString();
+    labels.push(tsLabel);
+    distanceSeries.push(dist);
 
-    if (d) d.textContent = distance !== null && distance !== undefined ? distance : "N/A";
-    if (l) l.textContent = line !== null && line !== undefined ? line : "N/A";
-    if (c) c.textContent = cameraStatus !== null && cameraStatus !== undefined ? cameraStatus : "N/A";
+    // keep last 30 points
+    if (labels.length > 30) {
+        labels.shift();
+        distanceSeries.shift();
+    }
+
+    distanceChart.update();
 }
 
-function fetchLiveSensors(){
-    fetch("/api/live-sensors")
-        .then(r => r.json())
-        .then(data => {
-            const nowLabel = new Date().toLocaleTimeString();
+async function refreshSensors() {
+    try {
+        const res = await fetch("/api/sensor-latest");
+        if (!res.ok) {
+            console.error("sensor-latest HTTP error", res.status);
+            return;
+        }
+        const data = await res.json();
+        if (!data.ok) {
+            console.error("sensor-latest JSON error", data);
+            return;
+        }
 
-            // Update chart if distance is numeric
-            const d = parseFloat(data.distance);
-            if (!isNaN(d)) {
-                distanceLabels.push(nowLabel);
-                distanceData.push(d);
+        const distanceValue = data.distance;
+        const lineValue = data.line;
+        const cameraValue = data.camera_status;
 
-                // Keep last 30 points so it does not explode
-                if (distanceLabels.length > 30) {
-                    distanceLabels.shift();
-                    distanceData.shift();
-                }
-
-                distanceChart.update();
+        if (distanceValue !== null && distanceValue !== undefined) {
+            document.getElementById("distanceValue").innerText = distanceValue;
+            document.getElementById("distanceUnit").innerText = "cm";
+            const floatDist = parseFloat(distanceValue);
+            if (!isNaN(floatDist)) {
+                addPointToChart(floatDist);
             }
+        } else {
+            document.getElementById("distanceValue").innerText = "N/A";
+            document.getElementById("distanceUnit").innerText = "";
+        }
 
-            updateText(data.distance, data.line, data.camera_status);
-        })
-        .catch(err => {
-            console.error("Error fetching live sensors:", err);
-        });
+        if (lineValue !== null && lineValue !== undefined) {
+            document.getElementById("lineValue").innerText = lineValue;
+        } else {
+            document.getElementById("lineValue").innerText = "N/A";
+        }
+
+        if (cameraValue !== null && cameraValue !== undefined) {
+            document.getElementById("cameraValue").innerText = cameraValue;
+        } else {
+            document.getElementById("cameraValue").innerText = "N/A";
+        }
+    } catch (err) {
+        console.error("refreshSensors error", err);
+    }
 }
 
-// First fetch on page load, then poll every 2 seconds
-fetchLiveSensors();
-setInterval(fetchLiveSensors, 2000);
+// Poll every 3 seconds
+setInterval(refreshSensors, 3000);
+
+// Also do an immediate refresh on page load
+refreshSensors();
 </script>
 {% endblock %}
