@@ -425,13 +425,16 @@ def publish_sensors(now):
         except:
             pass
 
-# === LED helpers ===
+# === LED helpers (fixed) ===
+
 def leds_off():
     if led_obj is None:
         return
     try:
-        led_obj.colorBlink(0)
-        led_obj.ledIndex(0x00, 0, 0, 0)
+        # directly clear all LEDs
+        for i in range(8):
+            led_obj.strip.set_led_rgb_data(i, (0,0,0))
+        led_obj.strip.show()
     except Exception as e:
         print("[led] off error:", e)
 
@@ -439,24 +442,24 @@ def leds_color(r, g, b):
     if led_obj is None:
         return
     try:
-        led_obj.ledIndex(0xFF, int(r), int(g), int(b))
+        # write all LEDs at once
+        for i in range(8):
+            led_obj.strip.set_led_rgb_data(i, (int(r), int(g), int(b)))
+        led_obj.strip.show()
     except Exception as e:
         print("[led] color error:", e)
 
 def handle_led_command(val: str):
     v = val.strip().lower()
+    print("[led handler] received =", v)
+
     if v in {"off", "0"}:
         leds_off()
     elif v in {"on", "white", "1"}:
         leds_color(255, 255, 255)
-    elif v == "red":
-        leds_color(255, 0, 0)
-    elif v == "green":
-        leds_color(0, 255, 0)
-    elif v == "blue":
-        leds_color(0, 0, 255)
     else:
         print("[led] unknown command:", val)
+
 
 # === Servo helpers ===
 def handle_servo0_command(val: str):
