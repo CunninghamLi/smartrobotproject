@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 # mqtt_drive.py
 # Robot brain for Adafruit IO control + real sensors + manual, line, obstacle, control modes
+# Now with local SQLite logging + Neon sync
 
-import os, sys, time, json, signal, threading, collections, atexit, math
+import os, sys, time, json, signal, threading, collections, atexit, math, sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import paho.mqtt.client as mqtt
+
+import psycopg2
 
 # === .env ===
 load_dotenv()
@@ -14,6 +17,9 @@ AIO_USER = os.getenv("AIO_USERNAME", "").strip()
 AIO_KEY  = os.getenv("AIO_KEY", "").strip()
 PREFIX   = os.getenv("AIO_PREFIX", "smartpath").strip()
 USE_TLS  = os.getenv("AIO_TLS", "1").strip().lower() in {"1","true","yes","on"}
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
 if not AIO_USER or not AIO_KEY:
     print("ERROR: Missing AIO_USERNAME or AIO_KEY in .env")
     sys.exit(1)
@@ -24,6 +30,8 @@ DATA_DIR = ROOT_DIR / "data"
 LOGS_DIR = ROOT_DIR / "logs"
 for d in (DATA_DIR, LOGS_DIR):
     d.mkdir(exist_ok=True)
+
+LOCAL_DB_PATH = DATA_DIR / "local_telemetry.db"
 
 # === config.json ===
 CFG_PATH = ROOT_DIR / "config.json"
@@ -75,7 +83,7 @@ FEED_CAMERA    = feed("camera") if "camera" in CFG.get("feeds", {}) else None
 
 FEED_LED     = feed("led")
 FEED_BUZZER  = feed("buzzer")
-FEED_MOTOR   = feed("motor")   # new motor feed
+FEED_MOTOR   = feed("motor")   # motor feed
 
 # === Freenove devices ===
 from motor import Ordinary_Car
@@ -99,6 +107,13 @@ _was_running_before_emergency = False
 car             = None
 client          = None
 _pub_thread     = None
+
+# DB globals
+_db_conn        = None
+_db_last_attempt = 0.0
+DB_RETRY_SEC    = 30.0
+
+_sqlite_conn    = None
 
 # Instantiate device objects
 try:
@@ -169,6 +184,189 @@ def update_distance_filter(d_raw):
         return None
     vals = sorted(distance_window)
     return vals[len(vals)//2]
+
+# === DB helpers: Neon (remote) ===
+
+def db_connect():
+    global _db_conn, _db_last_attempt
+    if not DATABASE_URL:
+        return None
+    now = time.time()
+    if _db_conn is not None:
+        return _db_conn
+    if now - _db_last_attempt < DB_RETRY_SEC:
+        return None
+    _db_last_attempt = now
+    try:
+        _db_conn = psycopg2.connect(DATABASE_URL)
+        _db_conn.autocommit = True
+        print("[db] connected to Neon")
+    except Exception as e:
+        print("[db] connect error:", e)
+        _db_conn = None
+    return _db_conn
+
+def db_init():
+    conn = db_connect()
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sensor_readings (
+                    id BIGSERIAL PRIMARY KEY,
+                    ts TIMESTAMPTZ NOT NULL,
+                    distance_cm DOUBLE PRECISION,
+                    line_state TEXT,
+                    running BOOLEAN,
+                    mode TEXT,
+                    speed_pct INTEGER
+                )
+                """
+            )
+        print("[db] sensor_readings table ready")
+    except Exception as e:
+        print("[db] init error:", e)
+
+def db_insert_sensor_row(ts_iso, distance, line_state, running_flag, mode, speed):
+    """
+    Insert one row into Neon. Raises if insert fails.
+    """
+    conn = db_connect()
+    if conn is None:
+        raise RuntimeError("Neon not connected")
+    try:
+        try:
+            ts = datetime.fromisoformat(ts_iso)
+        except Exception:
+            ts = datetime.now(timezone.utc)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sensor_readings
+                    (ts, distance_cm, line_state, running, mode, speed_pct)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (ts, distance, line_state, running_flag, mode, speed),
+            )
+    except Exception:
+        # propagate to let caller decide
+        raise
+
+# === DB helpers: local SQLite (primary + offline buffer) ===
+
+def sqlite_connect():
+    global _sqlite_conn
+    if _sqlite_conn is not None:
+        return _sqlite_conn
+    try:
+        _sqlite_conn = sqlite3.connect(str(LOCAL_DB_PATH))
+        _sqlite_conn.execute("PRAGMA journal_mode=WAL;")
+        print(f"[sqlite] connected at {LOCAL_DB_PATH}")
+    except Exception as e:
+        print("[sqlite] connect error:", e)
+        _sqlite_conn = None
+    return _sqlite_conn
+
+def sqlite_init():
+    conn = sqlite_connect()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sensor_readings_local (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                distance_cm REAL,
+                line_state TEXT,
+                running INTEGER,
+                mode TEXT,
+                speed_pct INTEGER,
+                synced INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.commit()
+        print("[sqlite] sensor_readings_local table ready")
+    except Exception as e:
+        print("[sqlite] init error:", e)
+
+def store_local_reading(ts_iso, distance, line_state, running_flag, mode, speed):
+    conn = sqlite_connect()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO sensor_readings_local
+                (ts, distance_cm, line_state, running, mode, speed_pct, synced)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (ts_iso, distance, line_state, 1 if running_flag else 0, mode, speed),
+        )
+        conn.commit()
+    except Exception as e:
+        print("[sqlite] insert error:", e)
+
+def push_pending_to_neon(max_rows=50):
+    """
+    Push up to max_rows unsynced local rows to Neon.
+    On success, mark them synced=1 in local SQLite.
+    """
+    if not DATABASE_URL:
+        return
+    conn_local = sqlite_connect()
+    if conn_local is None:
+        return
+    try:
+        cur = conn_local.cursor()
+        cur.execute(
+            """
+            SELECT id, ts, distance_cm, line_state, running, mode, speed_pct
+            FROM sensor_readings_local
+            WHERE synced = 0
+            ORDER BY id
+            LIMIT ?
+            """,
+            (max_rows,),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return
+
+        # Try inserting each row into Neon
+        synced_ids = []
+        for row in rows:
+            row_id, ts_iso, distance, line_state, running_int, mode, speed = row
+            try:
+                db_insert_sensor_row(
+                    ts_iso=ts_iso,
+                    distance=distance,
+                    line_state=line_state,
+                    running_flag=bool(running_int),
+                    mode=mode,
+                    speed=speed,
+                )
+                synced_ids.append(row_id)
+            except Exception as e:
+                # If we fail once, break and try again later
+                print(f"[sync] Neon insert failed for local id {row_id}:", e)
+                break
+
+        if synced_ids:
+            placeholders = ",".join("?" for _ in synced_ids)
+            cur.execute(
+                f"UPDATE sensor_readings_local SET synced = 1 WHERE id IN ({placeholders})",
+                synced_ids,
+            )
+            conn_local.commit()
+            print(f"[sync] marked {len(synced_ids)} local rows as synced")
+    except Exception as e:
+        print("[sync] general error:", e)
 
 # === logging helpers (UTC) ===
 USE_UTC = True
@@ -388,7 +586,6 @@ def read_camera_status():
     return "offline"
 
 def read_camera_fps():
-    # no separate fps feed
     return None
 
 SENSOR_INTERVAL = 2.0
@@ -795,18 +992,32 @@ def main_loop():
                 ensure_csv_header(path)
 
             ts   = iso_now()
-            dist = last_distance if last_distance is not None else ""
+            dist = last_distance if last_distance is not None else None
             line = last_line
             ml = "" if _last_logged_motor_left  is None else _last_logged_motor_left
             mr = "" if _last_logged_motor_right is None else _last_logged_motor_right
-            row = f'{ts},{dist},{line},{int(running)},{int(emergency_on)},{speed_pct},{ml},{mr},'
+            row = f'{ts},{dist if dist is not None else ""},{line},{int(running)},{int(emergency_on)},{speed_pct},{ml},{mr},'
             append_csv_row(path, row)
+
+            # local store + sync to Neon
+            try:
+                store_local_reading(
+                    ts_iso=ts,
+                    distance=dist,
+                    line_state=line,
+                    running_flag=bool(running),
+                    mode=current_mode,
+                    speed=speed_pct,
+                )
+                push_pending_to_neon()
+            except Exception as e:
+                print("[db] local/cloud logging error:", e)
 
         publish_sensors(now)
         STOP_EVENT.wait(0.05)
 
 def _shutdown_sequence():
-    global _shutting_down, _car_closed
+    global _shutting_down, _car_closed, _db_conn, _sqlite_conn
     if _shutting_down:
         return
     _shutting_down = True
@@ -841,6 +1052,18 @@ def _shutdown_sequence():
                 _car_closed = True
             except Exception as e:
                 print("[shutdown] car:", e)
+
+        if _db_conn is not None:
+            try:
+                _db_conn.close()
+            except:
+                pass
+
+        if _sqlite_conn is not None:
+            try:
+                _sqlite_conn.close()
+            except:
+                pass
 
     except Exception as e:
         print("[shutdown] general:", e)
@@ -877,6 +1100,14 @@ if __name__ == "__main__":
         client.loop_start()
 
         start_publisher_thread()
+
+        # init local SQLite and Neon table
+        sqlite_init()
+        if DATABASE_URL:
+            db_init()
+        else:
+            print("[db] DATABASE_URL not set, skipping Neon logging")
+
         main_loop()
     except KeyboardInterrupt:
         pass
