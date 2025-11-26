@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # mqtt_drive.py
-# Robot brain for Adafruit IO control + real sensors + manual, line, obstacle modes
+# Robot brain for Adafruit IO control + real sensors + manual, line, obstacle, control modes
 
 import os, sys, time, json, signal, threading, collections, atexit, math
 from pathlib import Path
@@ -74,15 +74,14 @@ FEED_LINE      = feed("line")
 FEED_CAMERA    = feed("camera") if "camera" in CFG.get("feeds", {}) else None
 
 FEED_LED     = feed("led")
-FEED_SERVO0  = feed("servo0")
 FEED_BUZZER  = feed("buzzer")
+FEED_MOTOR   = feed("motor")   # new motor feed
 
 # === Freenove devices ===
 from motor import Ordinary_Car
 from infrared import Infrared
 from ultrasonic import Ultrasonic
 from led import Led
-from servo import Servo
 from buzzer import Buzzer
 
 # === globals/state ===
@@ -92,6 +91,7 @@ emergency_on    = False
 speed_pct       = 35
 FORWARD_SIGN    = -1
 current_mode    = "manual"
+motor_cmd       = "stop"   # last motor direction command
 
 EMERGENCY_AUTO_RESUME = os.getenv("EMERGENCY_AUTO_RESUME", "0").strip().lower() in {"1","true","on","yes"}
 _was_running_before_emergency = False
@@ -106,12 +106,6 @@ try:
 except Exception as e:
     led_obj = None
     print("[init] LED init error:", e)
-
-try:
-    servo_obj = Servo()
-except Exception as e:
-    servo_obj = None
-    print("[init] Servo init error:", e)
 
 try:
     buzzer_obj = Buzzer()
@@ -394,7 +388,7 @@ def read_camera_status():
     return "offline"
 
 def read_camera_fps():
-    # you do not have a separate fps feed, so keep None
+    # no separate fps feed
     return None
 
 SENSOR_INTERVAL = 2.0
@@ -425,15 +419,13 @@ def publish_sensors(now):
         except:
             pass
 
-# === LED helpers (fixed) ===
-
+# === LED helpers ===
 def leds_off():
     if led_obj is None:
         return
     try:
-        # directly clear all LEDs
         for i in range(8):
-            led_obj.strip.set_led_rgb_data(i, (0,0,0))
+            led_obj.strip.set_led_rgb_data(i, (0, 0, 0))
         led_obj.strip.show()
     except Exception as e:
         print("[led] off error:", e)
@@ -442,7 +434,6 @@ def leds_color(r, g, b):
     if led_obj is None:
         return
     try:
-        # write all LEDs at once
         for i in range(8):
             led_obj.strip.set_led_rgb_data(i, (int(r), int(g), int(b)))
         led_obj.strip.show()
@@ -452,33 +443,12 @@ def leds_color(r, g, b):
 def handle_led_command(val: str):
     v = val.strip().lower()
     print("[led handler] received =", v)
-
     if v in {"off", "0"}:
         leds_off()
     elif v in {"on", "white", "1"}:
         leds_color(255, 255, 255)
     else:
         print("[led] unknown command:", val)
-
-
-# === Servo helpers ===
-def handle_servo0_command(val: str):
-    if servo_obj is None:
-        return
-    v = val.strip().lower()
-    try:
-        if v in {"left", "0"}:
-            servo_obj.set_servo_pwm("0", 0)
-        elif v in {"center", "mid", "90"}:
-            servo_obj.set_servo_pwm("0", 90)
-        elif v in {"right", "180"}:
-            servo_obj.set_servo_pwm("0", 180)
-        else:
-            angle = int(float(v))
-            angle = max(0, min(180, angle))
-            servo_obj.set_servo_pwm("0", angle)
-    except Exception as e:
-        print("[servo0] error:", e)
 
 # === Buzzer helpers ===
 def buzzer_off():
@@ -513,7 +483,8 @@ def handle_buzzer_command(val: str):
 # === MQTT callbacks ===
 def on_connect(c, u, flags, rc):
     print("Connected rc=", rc)
-    for f in (FEED_STARTSTOP, FEED_SPEED, FEED_MODE, FEED_LED, FEED_SERVO0, FEED_BUZZER):
+    for f in (FEED_STARTSTOP, FEED_SPEED, FEED_MODE,
+              FEED_LED, FEED_BUZZER, FEED_MOTOR):
         c.subscribe(f)
         print("Subscribed:", f)
     for t in EMERGENCY_TOPICS:
@@ -527,8 +498,8 @@ def on_disconnect(c, u, rc):
     print("Disconnected rc=", rc)
 
 def on_message(c, u, msg):
-    global running, speed_pct, emergency_on, _was_running_before_emergency, current_mode
-    global obstacle_phase
+    global running, speed_pct, emergency_on, _was_running_before_emergency
+    global current_mode, obstacle_phase, motor_cmd
 
     val = msg.payload.decode(errors="ignore").strip()
     print(f"MSG {msg.topic} -> {val}")
@@ -577,6 +548,8 @@ def on_message(c, u, msg):
             current_mode = "line"
         elif v.startswith("obstacle"):
             current_mode = "obstacle"
+        elif v.startswith("control"):
+            current_mode = "control"
         else:
             current_mode = "manual"
 
@@ -588,11 +561,18 @@ def on_message(c, u, msg):
     elif msg.topic == FEED_LED:
         handle_led_command(val)
 
-    elif msg.topic == FEED_SERVO0:
-        handle_servo0_command(val)
-
     elif msg.topic == FEED_BUZZER:
         handle_buzzer_command(val)
+
+    elif msg.topic == FEED_MOTOR:
+        cmd = val.lower()
+        if cmd == "backwards":
+            cmd = "backward"
+        if cmd in {"forward", "backward", "left", "right", "stop"}:
+            motor_cmd = cmd
+            print("[motor_cmd] ->", motor_cmd)
+        else:
+            print("[motor_cmd] unknown:", cmd)
 
 # === motors ===
 def _apply_motor(a,b,c,d):
@@ -662,6 +642,28 @@ def drive_manual():
         safe_stop()
         return
     drive_forward_pct(speed_pct)
+
+def drive_control():
+    """
+    Control mode: startstop ON, and motion is driven by motor_cmd.
+    """
+    if not running or emergency_on:
+        safe_stop()
+        return
+
+    cmd = motor_cmd
+    sp = max(0, speed_pct)
+
+    if cmd == "forward":
+        drive_forward_pct(sp)
+    elif cmd == "backward":
+        drive_backward_pct(sp)
+    elif cmd == "left":
+        turn_left_pct(sp)
+    elif cmd == "right":
+        turn_right_pct(sp)
+    else:
+        safe_stop()
 
 def drive_line():
     if not running or emergency_on:
@@ -778,6 +780,8 @@ def main_loop():
             drive_line()
         elif current_mode == "obstacle":
             drive_obstacle()
+        elif current_mode == "control":
+            drive_control()
         else:
             safe_stop()
 
