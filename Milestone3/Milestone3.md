@@ -23,5 +23,5 @@ Everything in the system is now fully functional. The robot successfully publish
 The major improvement I would make in the future is implementing a more advanced offline-sync system with conflict detection, so local readings merge intelligently with the cloud when the Pi reconnects. I would also add pagination to the history dashboard because the Neon table will grow large over time. Another improvement would be to containerize the entire project using Docker, which would make deployment onto another Raspberry Pi much simpler. Finally, creating more polished UI pages and adding camera streaming would make the dashboard feel more complete and closer to a production-ready IoT system.
 
 ## Demo Video  
-📺 **Link:** 
+📺 **Link:** https://1drv.ms/v/c/5ec1dadb80ca3cd5/EUK2QO21kttFvv5Y7yX93boBUIa22mB7-qtqGEQtCJwZ6g?e=5hCica
 
