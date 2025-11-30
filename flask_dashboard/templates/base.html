@@ -16,13 +16,15 @@
             <a href="/control">Control Car</a>
             <a href="/line">Line Tracking</a>
             <a href="/obstacle">Obstacle Avoidance</a>
-            <a href="/history">History></a>
+            <a href="{{ url_for('history') }}">History</a>
         </div>
     </nav>
 
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+    <footer style="text-align:center; padding:15px; margin-top:40px; color:#666; font-size:14px;">
+    Copyright 2025 SmartPath Project
+</footer>
 </body>
 </html>
-
